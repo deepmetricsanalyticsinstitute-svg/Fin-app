@@ -1,5 +1,7 @@
 {
-  "name": "Investment Calculator",
-  "description": "A simple React web application to calculate the future value of an investment based on principal amount, interest rate, time period, and compounding frequency.",
-  "requestFramePermissions": []
+  "name": "Financial Calculator",
+  "description": "A comprehensive React web application to calculate future value, present value, interest rate, or time period for an investment, considering compounding frequency, inflation, and voice notes.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

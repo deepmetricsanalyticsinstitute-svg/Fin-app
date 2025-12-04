@@ -6,21 +6,36 @@ export enum CompoundingFrequency {
   DAILY = 365,
 }
 
+export enum CalculationTarget {
+  FUTURE_VALUE = 'FUTURE_VALUE',
+  PRINCIPAL = 'PRINCIPAL',
+  ANNUAL_INTEREST_RATE = 'ANNUAL_INTEREST_RATE',
+  TIME_PERIOD = 'TIME_PERIOD',
+}
+
 export interface CalculationResult {
-  futureValue: number;
+  calculatedFutureValue?: number;
+  calculatedPrincipal?: number;
+  calculatedAnnualInterestRate?: number;
+  calculatedTimePeriod?: number;
   currencyCode: string;
-  customCurrencySymbol?: string; // Added optional customCurrencySymbol
+  customCurrencySymbol?: string;
   error?: string;
-  growthData?: { year: number; value: number; }[]; // Added for charting
-  realFutureValue?: number; // New: Optional real future value
+  growthData?: { year: number; value: number; }[];
+  realFutureValue?: number;
+  voiceNoteTranscript?: string; // Added voiceNoteTranscript
+  calculationTarget?: CalculationTarget; // Added to store which target was calculated
 }
 
 export interface InvestmentInputs {
-  principal: number;
-  interestRate: number;
-  timePeriod: number;
+  calculationTarget: CalculationTarget;
+  principalInput?: number; // Optional as it might be the target
+  futureValueInput?: number; // Optional as it might be the target
+  annualInterestRateInput?: number; // Optional as it might be the target
+  timePeriodInput?: number; // Optional as it might be the target
   compoundingFrequency: CompoundingFrequency;
   currencyCode: string;
-  customCurrencySymbol?: string; // Added optional customCurrencySymbol
-  inflationRate?: number; // New: Optional inflation rate
+  customCurrencySymbol?: string;
+  inflationRate?: number;
+  voiceNoteTranscript?: string; // Added voiceNoteTranscript
 }

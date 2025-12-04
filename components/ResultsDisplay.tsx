@@ -1,4 +1,5 @@
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect, useState } from 'react';
+import { CalculationTarget } from '../types';
 
 // Declare Chart globally as it's loaded via CDN
 declare global {
@@ -8,17 +9,43 @@ declare global {
 }
 
 interface ResultsDisplayProps {
-  futureValue: number | null;
+  calculationTarget?: CalculationTarget; // New: To determine what to display
+  calculatedFutureValue?: number | null;
+  calculatedPrincipal?: number | null;
+  calculatedAnnualInterestRate?: number | null;
+  calculatedTimePeriod?: number | null;
   errorMessage?: string;
   currencyCode?: string;
   customCurrencySymbol?: string;
   growthData?: { year: number; value: number; }[];
-  realFutureValue?: number; // New: Optional real future value
+  realFutureValue?: number | null;
+  voiceNoteTranscript?: string; // New: Voice note transcript
 }
 
-const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessage, currencyCode = 'USD', customCurrencySymbol, growthData, realFutureValue }) => {
+const ANIMATION_DURATION_MS = 1000; // Animation duration in milliseconds
+
+const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
+  calculationTarget,
+  calculatedFutureValue = null,
+  calculatedPrincipal = null,
+  calculatedAnnualInterestRate = null,
+  calculatedTimePeriod = null,
+  errorMessage,
+  currencyCode = 'USD',
+  customCurrencySymbol,
+  growthData,
+  realFutureValue = null,
+  voiceNoteTranscript,
+}) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null); // To store the Chart.js instance
+
+  // State for animated values
+  const [animatedFutureValue, setAnimatedFutureValue] = useState(0);
+  const [animatedRealFutureValue, setAnimatedRealFutureValue] = useState(0);
+  const [animatedPrincipal, setAnimatedPrincipal] = useState(0);
+  const [animatedAnnualInterestRate, setAnimatedAnnualInterestRate] = useState(0);
+  const [animatedTimePeriod, setAnimatedTimePeriod] = useState(0);
 
   const formatCurrency = useCallback((amount: number, code: string, customSymbol?: string) => {
     if (customSymbol && customSymbol.trim() !== '') {
@@ -29,8 +56,53 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessa
     }
   }, []);
 
+  const formatPercentage = useCallback((amount: number) => {
+    return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+  }, []);
+
+  const formatYears = useCallback((amount: number) => {
+    return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} years`;
+  }, []);
+
+  // Generic animation hook
+  const useCountUpAnimation = (targetValue: number | null, setAnimatedValue: React.Dispatch<React.SetStateAction<number>>) => {
+    useEffect(() => {
+      if (targetValue !== null && targetValue >= 0) {
+        let startTimestamp: DOMHighResTimeStamp;
+        const startValue = 0;
+
+        const animate = (currentTime: DOMHighResTimeStamp) => {
+          if (!startTimestamp) startTimestamp = currentTime;
+          const progress = (currentTime - startTimestamp) / ANIMATION_DURATION_MS;
+
+          if (progress < 1) {
+            const easedProgress = 0.5 - Math.cos(progress * Math.PI) / 2; // Ease-in-out
+            setAnimatedValue(startValue + (targetValue - startValue) * easedProgress);
+            requestAnimationFrame(animate);
+          } else {
+            setAnimatedValue(targetValue);
+          }
+        };
+
+        const animationFrameId = requestAnimationFrame(animate);
+
+        return () => cancelAnimationFrame(animationFrameId);
+      } else {
+        setAnimatedValue(0); // Reset if target value is not valid
+      }
+    }, [targetValue, setAnimatedValue]);
+  };
+
+  useCountUpAnimation(calculatedFutureValue, setAnimatedFutureValue);
+  useCountUpAnimation(realFutureValue, setAnimatedRealFutureValue);
+  useCountUpAnimation(calculatedPrincipal, setAnimatedPrincipal);
+  useCountUpAnimation(calculatedAnnualInterestRate, setAnimatedAnnualInterestRate);
+  useCountUpAnimation(calculatedTimePeriod, setAnimatedTimePeriod);
+
+
   useEffect(() => {
-    if (chartRef.current && growthData && growthData.length > 0 && window.Chart) {
+    // Only render chart if calculation target is Future Value and growth data exists
+    if (calculationTarget === CalculationTarget.FUTURE_VALUE && chartRef.current && growthData && growthData.length > 0 && window.Chart) {
       if (chartInstance.current) {
         chartInstance.current.destroy(); // Destroy existing chart before creating a new one
       }
@@ -54,7 +126,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessa
           },
           options: {
             responsive: true,
-            maintainAspectRatio: false, // Allows the chart to resize freely
+            maintainAspectRatio: false,
             plugins: {
               title: {
                 display: true,
@@ -100,6 +172,12 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessa
           },
         });
       }
+    } else {
+      // Destroy chart if not calculating FV or no growth data
+      if (chartInstance.current) {
+        chartInstance.current.destroy();
+        chartInstance.current = null;
+      }
     }
 
     return () => {
@@ -108,7 +186,98 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessa
         chartInstance.current = null;
       }
     };
-  }, [growthData, currencyCode, customCurrencySymbol, formatCurrency]); // Re-render chart if these dependencies change
+  }, [calculationTarget, growthData, currencyCode, customCurrencySymbol, formatCurrency]);
+
+
+  const renderCalculatedValue = () => {
+    switch (calculationTarget) {
+      case CalculationTarget.FUTURE_VALUE:
+        if (calculatedFutureValue !== null && calculatedFutureValue > 0) {
+          return (
+            <div className="text-center">
+              <p className="text-lg text-gray-700 mb-2">Your investment will be worth (Nominal):</p>
+              <p className="text-5xl font-extrabold text-blue-700 leading-tight">
+                {formatCurrency(animatedFutureValue, currencyCode, customCurrencySymbol)}
+              </p>
+
+              {realFutureValue !== null && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <p className="text-lg text-gray-700 mb-2">Real future value (adjusted for inflation):</p>
+                  <p className="text-4xl font-extrabold text-green-700 leading-tight">
+                    {formatCurrency(animatedRealFutureValue, currencyCode, customCurrencySymbol)}
+                  </p>
+                  <p className="text-gray-500 mt-2 text-sm">
+                    This value reflects your purchasing power after inflation.
+                  </p>
+                </div>
+              )}
+
+              <p className="text-gray-500 mt-4 text-sm">
+                This is the estimated future value of your investment.
+              </p>
+              {growthData && growthData.length > 0 && (
+                <div className="mt-8">
+                  <div className="relative h-64 w-full">
+                    <canvas ref={chartRef}></canvas>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        }
+        break;
+      case CalculationTarget.PRINCIPAL:
+        if (calculatedPrincipal !== null && calculatedPrincipal > 0) {
+          return (
+            <div className="text-center">
+              <p className="text-lg text-gray-700 mb-2">You need to invest:</p>
+              <p className="text-5xl font-extrabold text-blue-700 leading-tight">
+                {formatCurrency(animatedPrincipal, currencyCode, customCurrencySymbol)}
+              </p>
+              <p className="text-gray-500 mt-4 text-sm">
+                This is the present value required to reach your target future value.
+              </p>
+            </div>
+          );
+        }
+        break;
+      case CalculationTarget.ANNUAL_INTEREST_RATE:
+        if (calculatedAnnualInterestRate !== null && calculatedAnnualInterestRate >= 0) {
+          return (
+            <div className="text-center">
+              <p className="text-lg text-gray-700 mb-2">Required Annual Interest Rate:</p>
+              <p className="text-5xl font-extrabold text-blue-700 leading-tight">
+                {formatPercentage(animatedAnnualInterestRate)}
+              </p>
+              <p className="text-gray-500 mt-4 text-sm">
+                This is the annual interest rate needed to achieve your target.
+              </p>
+            </div>
+          );
+        }
+        break;
+      case CalculationTarget.TIME_PERIOD:
+        if (calculatedTimePeriod !== null && calculatedTimePeriod >= 0) {
+          return (
+            <div className="text-center">
+              <p className="text-lg text-gray-700 mb-2">Time Period Required:</p>
+              <p className="text-5xl font-extrabold text-blue-700 leading-tight">
+                {formatYears(animatedTimePeriod)}
+              </p>
+              <p className="text-gray-500 mt-4 text-sm">
+                This is the number of years required to reach your target future value.
+              </p>
+            </div>
+          );
+        }
+        break;
+      default:
+        // No calculation target selected or invalid state
+        return null;
+    }
+    return null; // Fallback for invalid states for specific targets
+  };
+
 
   return (
     <div className="p-8 rounded-lg shadow-xl bg-white w-full max-w-lg mt-8 sm:mt-0 lg:ml-8">
@@ -119,40 +288,21 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ futureValue, errorMessa
           <strong className="font-bold">Error!</strong>
           <span className="block sm:inline ml-2">{errorMessage}</span>
         </div>
-      ) : futureValue !== null && futureValue > 0 ? (
-        <div className="text-center">
-          <p className="text-lg text-gray-700 mb-2">Your investment will be worth (Nominal):</p>
-          <p className="text-5xl font-extrabold text-blue-700 leading-tight">
-            {formatCurrency(futureValue, currencyCode, customCurrencySymbol)}
-          </p>
-
-          {realFutureValue !== undefined && realFutureValue !== null && (
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <p className="text-lg text-gray-700 mb-2">Real future value (adjusted for inflation):</p>
-              <p className="text-4xl font-extrabold text-green-700 leading-tight">
-                {formatCurrency(realFutureValue, currencyCode, customCurrencySymbol)}
-              </p>
-              <p className="text-gray-500 mt-2 text-sm">
-                This value reflects your purchasing power after inflation.
-              </p>
-            </div>
-          )}
-
-          <p className="text-gray-500 mt-4 text-sm">
-            This is the estimated future value of your investment.
-          </p>
-          {growthData && growthData.length > 0 && (
-            <div className="mt-8">
-              <div className="relative h-64 w-full"> {/* Fixed height for the chart container */}
-                <canvas ref={chartRef}></canvas>
-              </div>
-            </div>
-          )}
-        </div>
       ) : (
-        <div className="text-center text-gray-500 italic">
-          Enter your investment details and click 'Calculate' to see the results.
-        </div>
+        <>
+          {renderCalculatedValue()}
+          {voiceNoteTranscript && (
+            <div className="mt-6 pt-4 border-t border-gray-200">
+              <p className="text-lg text-gray-700 mb-2">Your Voice Note:</p>
+              <p className="text-gray-800 italic">{voiceNoteTranscript}</p>
+            </div>
+          )}
+          {!calculatedFutureValue && !calculatedPrincipal && !calculatedAnnualInterestRate && !calculatedTimePeriod && !voiceNoteTranscript && (
+            <div className="text-center text-gray-500 italic">
+              Enter your financial details and click 'Calculate' to see the results.
+            </div>
+          )}
+        </>
       )}
     </div>
   );

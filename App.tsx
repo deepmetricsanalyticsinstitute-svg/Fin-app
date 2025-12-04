@@ -1,14 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import InvestmentForm from './components/InvestmentForm';
 import ResultsDisplay from './components/ResultsDisplay';
-import { calculateFutureValue } from './services/calculationService';
+import { performFinancialCalculation } from './services/calculationService'; // Updated import
 import { CalculationResult, InvestmentInputs } from './types';
 
 const App: React.FC = () => {
   const [calculationResult, setCalculationResult] = useState<CalculationResult | null>(null);
 
   const handleCalculate = useCallback((inputs: InvestmentInputs) => {
-    const result = calculateFutureValue(inputs);
+    const result = performFinancialCalculation(inputs); // Updated function call
     setCalculationResult(result);
   }, []);
 
@@ -16,12 +16,17 @@ const App: React.FC = () => {
     <div className="flex flex-col lg:flex-row items-center justify-center p-4">
       <InvestmentForm onCalculate={handleCalculate} />
       <ResultsDisplay
-        futureValue={calculationResult?.futureValue ?? null}
+        calculationTarget={calculationResult?.calculationTarget} // Pass calculation target
+        calculatedFutureValue={calculationResult?.calculatedFutureValue ?? null}
+        calculatedPrincipal={calculationResult?.calculatedPrincipal ?? null}
+        calculatedAnnualInterestRate={calculationResult?.calculatedAnnualInterestRate ?? null}
+        calculatedTimePeriod={calculationResult?.calculatedTimePeriod ?? null}
         errorMessage={calculationResult?.error}
         currencyCode={calculationResult?.currencyCode}
         customCurrencySymbol={calculationResult?.customCurrencySymbol}
         growthData={calculationResult?.growthData}
-        realFutureValue={calculationResult?.realFutureValue} // Pass realFutureValue
+        realFutureValue={calculationResult?.realFutureValue ?? null}
+        voiceNoteTranscript={calculationResult?.voiceNoteTranscript} // Pass voice note transcript
       />
     </div>
   );
