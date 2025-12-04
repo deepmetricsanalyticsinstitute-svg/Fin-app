@@ -47,6 +47,9 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
+  // State to track which input is focused for currency formatting
+  const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
+
   const validate = useCallback(() => {
     const newErrors: { [key: string]: string } = {};
 
@@ -56,24 +59,33 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     const checkNonNegative = (value: number | undefined, key: string, label: string) => {
       if (value === undefined || value < 0) newErrors[key] = `${label} cannot be negative.`;
     };
+    const checkValueTooHigh = (value: number | undefined, key: string, label: string, limit: number) => {
+      if (value !== undefined && value > limit) newErrors[key] = `${label} seems unusually high (>${limit}).`;
+    };
+
 
     switch (calculationTarget) {
       case CalculationTarget.FUTURE_VALUE:
         checkPositive(principalInput, 'principalInput', 'Principal amount');
         checkNonNegative(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate');
+        checkValueTooHigh(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate', 500);
         checkPositive(timePeriodInput, 'timePeriodInput', 'Time period');
+        checkValueTooHigh(timePeriodInput, 'timePeriodInput', 'Time period', 100);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         break;
       case CalculationTarget.PRINCIPAL:
         checkPositive(futureValueInput, 'futureValueInput', 'Future value');
         checkNonNegative(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate');
+        checkValueTooHigh(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate', 500);
         checkPositive(timePeriodInput, 'timePeriodInput', 'Time period');
+        checkValueTooHigh(timePeriodInput, 'timePeriodInput', 'Time period', 100);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         break;
       case CalculationTarget.ANNUAL_INTEREST_RATE:
         checkPositive(principalInput, 'principalInput', 'Principal amount');
         checkPositive(futureValueInput, 'futureValueInput', 'Future value');
         checkPositive(timePeriodInput, 'timePeriodInput', 'Time period');
+        checkValueTooHigh(timePeriodInput, 'timePeriodInput', 'Time period', 100);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         if (futureValueInput !== undefined && principalInput !== undefined && futureValueInput < principalInput) {
           newErrors.futureValueInput = 'Future value must be greater than or equal to principal.';
@@ -83,6 +95,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         checkPositive(principalInput, 'principalInput', 'Principal amount');
         checkPositive(futureValueInput, 'futureValueInput', 'Future value');
         checkPositive(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate');
+        checkValueTooHigh(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate', 500);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         if (futureValueInput !== undefined && principalInput !== undefined && futureValueInput < principalInput) {
           newErrors.futureValueInput = 'Future value must be greater than or equal to principal.';
@@ -91,14 +104,16 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
       case CalculationTarget.LOAN_PAYMENT: // New case for Loan Calculator
         checkPositive(loanAmount, 'loanAmount', 'Loan amount');
         checkNonNegative(loanInterestRate, 'loanInterestRate', 'Loan interest rate');
+        checkValueTooHigh(loanInterestRate, 'loanInterestRate', 'Loan interest rate', 500);
         checkPositive(loanTerm, 'loanTerm', 'Loan term');
+        checkValueTooHigh(loanTerm, 'loanTerm', 'Loan term', 100);
         break;
     }
 
     if (calculationTarget !== CalculationTarget.LOAN_PAYMENT) {
       checkNonNegative(inflationRate, 'inflationRate', 'Inflation rate');
+      checkValueTooHigh(inflationRate, 'inflationRate', 'Inflation rate', 100);
     }
-
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -115,23 +130,32 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     loanTerm,
   ]);
 
-  const formatCurrencyValue = useCallback((amount: number | string, code: string, customSymbol?: string) => {
+  const formatNumberForInputDisplay = useCallback((amount: number | string) => {
     if (typeof amount !== 'number') return String(amount);
-    if (customSymbol && customSymbol.trim() !== '') {
-      const formattedNumber = amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      return `${customSymbol.trim()} ${formattedNumber}`;
-    } else {
-      return amount.toLocaleString(undefined, { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
+    return amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }, []);
 
   const getCurrencyPlaceholder = useCallback((code: string, customSymbol?: string) => {
     if (customSymbol && customSymbol.trim() !== '') {
       return `e.g., ${customSymbol.trim()}10,000.00`;
     }
-    const currencyInfo = CURRENCY_OPTIONS.find(opt => opt.value === code);
-    const symbol = currencyInfo ? currencyInfo.label.split(' ')[1] : '';
-    return `e.g., ${symbol}10,000.00`;
+    // Attempt to get the actual currency symbol from Intl.NumberFormat
+    try {
+      const formatter = new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: code,
+        minimumFractionDigits: 0, // To get just the symbol
+        maximumFractionDigits: 0, // To get just the symbol
+      });
+      // Extract the symbol by formatting 0 and taking what's before/after
+      const parts = formatter.formatToParts(0);
+      const symbolPart = parts.find(part => part.type === 'currency');
+      const symbol = symbolPart ? symbolPart.value : code; // Fallback to code if symbol not found
+      return `e.g., ${symbol}10,000.00`;
+    } catch (e) {
+      console.warn('Error getting currency symbol for placeholder:', e);
+      return `e.g., $10,000.00`; // Default fallback
+    }
   }, []);
 
   const parseCurrencyInput = useCallback((value: string, setter: React.Dispatch<React.SetStateAction<number>>) => {
@@ -139,6 +163,13 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     const numValue = parseFloat(cleanedValue);
     setter(isNaN(numValue) ? 0 : numValue);
   }, []);
+
+  const parseNumberInput = useCallback((value: string, setter: React.Dispatch<React.SetStateAction<number>>, minAllowed: number = 0) => {
+    const cleanedValue = value.replace(/[^0-9.]/g, ''); // Allow only numbers and dot
+    const numValue = parseFloat(cleanedValue);
+    setter(isNaN(numValue) || value === '' ? minAllowed : numValue);
+  }, []);
+
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -254,13 +285,16 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               label="Principal Amount"
               id="principalInput"
               type="text"
-              value={formatCurrencyValue(principalInput, selectedCurrencyCode, customCurrencySymbol)}
+              value={focusedInputId === 'principalInput' ? principalInput.toString() : formatNumberForInputDisplay(principalInput)}
               onChange={(e) => parseCurrencyInput(e.target.value, setPrincipalInput)}
               placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
               errorMessage={errors.principalInput}
+              onFocus={() => setFocusedInputId('principalInput')}
+              onBlur={() => setFocusedInputId(null)}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-                  <path fillRule="evenodd" d="M12 1.5a.75.75 0 01.75.75V4.5a.75.75 0 01-1.5 0V2.25c0-.414.336-.75.75-.75zm0 15a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25c0-.414.336-.75.75-.75zM2.25 12a.75.75 0 01.75-.75H4.5a.75.75 0 010 1.5H3a.75.75 0 01-.75-.75zM19.5 12a.75.75 0 01.75-.75H21a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM6 10.5a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zm10.5 0a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM8.25 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H9a.75.75 0 01-.75-.75zm5.25-.75a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V5.25c0-.414.336-.75.75-.75zM12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z" clipRule="evenodd" />
+                  <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
+                  <path fillRule="evenodd" d="M8.25 0A9.75 9.75 0 002.25 6H0v1.5h2.25A9.75 9.75 0 000 12c0 2.296.84 4.417 2.25 6H0v1.5h2.25A9.75 9.75 0 008.25 24h7.5A9.75 9.75 0 0021.75 18H24v-1.5h-2.25A9.75 9.75 0 0024 12c0-2.296-.84-4.417-2.25-6H24V4.5h-2.25A9.75 9.75 0 0015.75 0h-7.5ZM4.5 7.5a8.25 8.25 0 1016.5 0v.75a8.25 8.25 0 00-16.5 0V7.5Zm-.75 4.5a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5H4.5a.75.75 0 01-.75-.75Zm16.5 0a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5h-.75a.75.75 0 01-.75-.75Z" clipRule="evenodd" />
                 </svg>
               }
             />
@@ -272,13 +306,16 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               label="Future Value"
               id="futureValueInput"
               type="text"
-              value={formatCurrencyValue(futureValueInput, selectedCurrencyCode, customCurrencySymbol)}
+              value={focusedInputId === 'futureValueInput' ? futureValueInput.toString() : formatNumberForInputDisplay(futureValueInput)}
               onChange={(e) => parseCurrencyInput(e.target.value, setFutureValueInput)}
               placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
               errorMessage={errors.futureValueInput}
+              onFocus={() => setFocusedInputId('futureValueInput')}
+              onBlur={() => setFocusedInputId(null)}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-                  <path fillRule="evenodd" d="M12 1.5a.75.75 0 01.75.75V4.5a.75.75 0 01-1.5 0V2.25c0-.414.336-.75.75-.75zm0 15a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25c0-.414.336-.75.75-.75zM2.25 12a.75.75 0 01.75-.75H4.5a.75.75 0 010 1.5H3a.75.75 0 01-.75-.75zM19.5 12a.75.75 0 01.75-.75H21a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM6 10.5a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zm10.5 0a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM8.25 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H9a.75.75 0 01-.75-.75zm5.25-.75a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V5.25c0-.414.336-.75.75-.75zM12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z" clipRule="evenodd" />
+                  <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
+                  <path fillRule="evenodd" d="M8.25 0A9.75 9.75 0 002.25 6H0v1.5h2.25A9.75 9.75 0 000 12c0 2.296.84 4.417 2.25 6H0v1.5h2.25A9.75 9.75 0 008.25 24h7.5A9.75 9.75 0 0021.75 18H24v-1.5h-2.25A9.75 9.75 0 0024 12c0-2.296-.84-4.417-2.25-6H24V4.5h-2.25A9.75 9.75 0 0015.75 0h-7.5ZM4.5 7.5a8.25 8.25 0 1016.5 0v.75a8.25 8.25 0 00-16.5 0V7.5Zm-.75 4.5a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5H4.5a.75.75 0 01-.75-.75Zm16.5 0a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5h-.75a.75.75 0 01-.75-.75Z" clipRule="evenodd" />
                 </svg>
               }
             />
@@ -291,7 +328,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               id="annualInterestRateInput"
               type="number"
               value={annualInterestRateInput}
-              onChange={(e) => setAnnualInterestRateInput(parseFloat(e.target.value))}
+              onChange={(e) => parseNumberInput(e.target.value, setAnnualInterestRateInput)}
               min={0}
               step="0.01"
               placeholder="e.g., 5"
@@ -311,7 +348,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               id="timePeriodInput"
               type="number"
               value={timePeriodInput}
-              onChange={(e) => setTimePeriodInput(parseFloat(e.target.value))}
+              onChange={(e) => parseNumberInput(e.target.value, setTimePeriodInput, 1)}
               min={1}
               step="1"
               placeholder="e.g., 10"
@@ -342,15 +379,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Assumed Inflation Rate (%) (Optional)"
             id="inflationRate"
             type="number"
-            value={inflationRate === 0 && (calculationTarget === CalculationTarget.FUTURE_VALUE || calculationTarget === CalculationTarget.PRINCIPAL) ? '' : inflationRate}
-            onChange={(e) => {
-              const value = e.target.value;
-              setInflationRate(value === '' ? 0 : parseFloat(value));
-            }}
+            value={inflationRate === 0 && (focusedInputId !== 'inflationRate') ? '' : inflationRate} // Display empty if 0 and not focused
+            onChange={(e) => parseNumberInput(e.target.value, setInflationRate)}
             min={0}
             step="0.01"
             placeholder="e.g., 2"
             errorMessage={errors.inflationRate}
+            onFocus={() => setFocusedInputId('inflationRate')}
+            onBlur={() => setFocusedInputId(null)}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM8.25 15.75L15.75 8.25"></path>
@@ -365,13 +401,16 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Loan Amount"
             id="loanAmount"
             type="text"
-            value={formatCurrencyValue(loanAmount, selectedCurrencyCode, customCurrencySymbol)}
+            value={focusedInputId === 'loanAmount' ? loanAmount.toString() : formatNumberForInputDisplay(loanAmount)}
             onChange={(e) => parseCurrencyInput(e.target.value, setLoanAmount)}
             placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
             errorMessage={errors.loanAmount}
+            onFocus={() => setFocusedInputId('loanAmount')}
+            onBlur={() => setFocusedInputId(null)}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-                <path fillRule="evenodd" d="M12 1.5a.75.75 0 01.75.75V4.5a.75.75 0 01-1.5 0V2.25c0-.414.336-.75.75-.75zm0 15a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25c0-.414.336-.75.75-.75zM2.25 12a.75.75 0 01.75-.75H4.5a.75.75 0 010 1.5H3a.75.75 0 01-.75-.75zM19.5 12a.75.75 0 01.75-.75H21a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM6 10.5a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H6.75a.75.75 0 01-.75-.75zm10.5 0a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5a.75.75 0 01-.75-.75zM8.25 5.25a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5H9a.75.75 0 01-.75-.75zm5.25-.75a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V5.25c0-.414.336-.75.75-.75zM12 7.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z" clipRule="evenodd" />
+                <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
+                <path fillRule="evenodd" d="M8.25 0A9.75 9.75 0 002.25 6H0v1.5h2.25A9.75 9.75 0 000 12c0 2.296.84 4.417 2.25 6H0v1.5h2.25A9.75 9.75 0 008.25 24h7.5A9.75 9.75 0 0021.75 18H24v-1.5h-2.25A9.75 9.75 0 0024 12c0-2.296-.84-4.417-2.25-6H24V4.5h-2.25A9.75 9.75 0 0015.75 0h-7.5ZM4.5 7.5a8.25 8.25 0 1016.5 0v.75a8.25 8.25 0 00-16.5 0V7.5Zm-.75 4.5a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5H4.5a.75.75 0 01-.75-.75Zm16.5 0a.75.75 0 01.75-.75h.75a.75.75 0 010 1.5h-.75a.75.75 0 01-.75-.75Z" clipRule="evenodd" />
               </svg>
             }
           />
@@ -381,12 +420,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Annual Interest Rate (%)"
             id="loanInterestRate"
             type="number"
-            value={loanInterestRate}
-            onChange={(e) => setLoanInterestRate(parseFloat(e.target.value))}
+            value={loanInterestRate === 0 && (focusedInputId !== 'loanInterestRate') ? '' : loanInterestRate} // Display empty if 0 and not focused
+            onChange={(e) => parseNumberInput(e.target.value, setLoanInterestRate)}
             min={0}
             step="0.01"
             placeholder="e.g., 4.5"
             errorMessage={errors.loanInterestRate}
+            onFocus={() => setFocusedInputId('loanInterestRate')}
+            onBlur={() => setFocusedInputId(null)}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.004.996a2.002 2.002 0 012.83 0L14 10.17V5h5a2 2 0 012 2v5l1.17-1.17a2.002 2.002 0 010 2.83L12 22l-7.17-7.17a2.002 2.002 0 010-2.83l.83-.83H5a2 2 0 01-2-2V7a2 2 0 012-2h5l-2.17 2.17a2.002 2.002 0 010 2.83L9 14z" />
@@ -399,12 +440,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Loan Term (Years)"
             id="loanTerm"
             type="number"
-            value={loanTerm}
-            onChange={(e) => setLoanTerm(parseFloat(e.target.value))}
+            value={loanTerm === 0 && (focusedInputId !== 'loanTerm') ? '' : loanTerm} // Display empty if 0 and not focused
+            onChange={(e) => parseNumberInput(e.target.value, setLoanTerm, 1)}
             min={1}
             step="1"
             placeholder="e.g., 30"
             errorMessage={errors.loanTerm}
+            onFocus={() => setFocusedInputId('loanTerm')}
+            onBlur={() => setFocusedInputId(null)}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />

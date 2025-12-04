@@ -1,6 +1,6 @@
 
 import React, { useCallback, useRef, useEffect, useState } from 'react';
-import { CalculationTarget, AmortizationEntry, LoanScenario, InvestmentInputs } from '../types';
+import { CalculationTarget, AmortizationEntry, LoanScenario, InvestmentInputs, InvestmentScenario } from '../types';
 
 // Declare Chart globally as it's loaded via CDN
 declare global {
@@ -32,6 +32,13 @@ interface ResultsDisplayProps {
   onRemoveLoanScenario: (id: string) => void;
   selectedScenarioForComparison: string[];
   onToggleScenarioForComparison: (id: string) => void;
+
+  // New props for investment comparison
+  onSaveInvestmentScenario: (scenario: InvestmentScenario) => void;
+  savedInvestmentScenarios: InvestmentScenario[];
+  onRemoveInvestmentScenario: (id: string) => void;
+  selectedInvestmentForComparison: string[];
+  onToggleInvestmentScenarioForComparison: (id: string) => void;
 }
 
 const ANIMATION_DURATION_MS = 1000; // Animation duration in milliseconds
@@ -59,9 +66,19 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
   onRemoveLoanScenario,
   selectedScenarioForComparison,
   onToggleScenarioForComparison,
+
+  // Investment comparison props
+  onSaveInvestmentScenario,
+  savedInvestmentScenarios,
+  onRemoveInvestmentScenario,
+  selectedInvestmentForComparison,
+  onToggleInvestmentScenarioForComparison,
 }) => {
-  const chartRef = useRef<HTMLCanvasElement>(null);
-  const chartInstance = useRef<any>(null); // To store the Chart.js instance
+  const chartRef = useRef<HTMLCanvasElement>(null); // For investment growth chart
+  const chartInstance = useRef<any>(null); // To store the Chart.js instance for investment growth
+
+  const amortizationChartRef = useRef<HTMLCanvasElement>(null); // For amortization chart
+  const amortizationChartInstance = useRef<any>(null); // To store the Chart.js instance for amortization
 
   // State for animated values
   const [animatedFutureValue, setAnimatedFutureValue] = useState(0);
@@ -130,7 +147,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
 
 
   useEffect(() => {
-    // Only render chart if calculation target is Future Value and growth data exists
+    // Only render investment growth chart if calculation target is Future Value and growth data exists
     if (calculationTarget === CalculationTarget.FUTURE_VALUE && chartRef.current && growthData && growthData.length > 0 && window.Chart) {
       if (chartInstance.current) {
         chartInstance.current.destroy(); // Destroy existing chart before creating a new one
@@ -217,6 +234,105 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
     };
   }, [calculationTarget, growthData, currencyCode, customCurrencySymbol, formatCurrency]);
 
+  useEffect(() => {
+    // Only render amortization chart if calculation target is Loan Payment and schedule exists
+    if (calculationTarget === CalculationTarget.LOAN_PAYMENT && amortizationChartRef.current && amortizationSchedule && amortizationSchedule.length > 0 && window.Chart) {
+      if (amortizationChartInstance.current) {
+        amortizationChartInstance.current.destroy(); // Destroy existing chart
+      }
+
+      const ctx = amortizationChartRef.current.getContext('2d');
+      if (ctx) {
+        amortizationChartInstance.current = new window.Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: amortizationSchedule.map(entry => entry.paymentNumber),
+            datasets: [
+              {
+                label: 'Principal Paid',
+                data: amortizationSchedule.map(entry => entry.principalPaid),
+                backgroundColor: 'rgba(75, 192, 192, 0.8)',
+              },
+              {
+                label: 'Interest Paid',
+                data: amortizationSchedule.map(entry => entry.interestPaid),
+                backgroundColor: 'rgba(255, 99, 132, 0.8)',
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: 'Amortization Breakdown per Payment',
+                font: {
+                  size: 16,
+                },
+              },
+              tooltip: {
+                mode: 'index',
+                intersect: false,
+                callbacks: {
+                  label: function(context: any) {
+                    let label = context.dataset.label || '';
+                    if (label) {
+                      label += ': ';
+                    }
+                    if (context.parsed.y !== null) {
+                      label += formatCurrency(context.parsed.y, currencyCode, customCurrencySymbol);
+                    }
+                    return label;
+                  },
+                  footer: function(tooltipItems: any) {
+                    const total = tooltipItems.reduce((sum: number, item: any) => sum + item.parsed.y, 0);
+                    return `Total Payment: ${formatCurrency(total, currencyCode, customCurrencySymbol)}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                stacked: true,
+                title: {
+                  display: true,
+                  text: 'Payment Number',
+                },
+              },
+              y: {
+                stacked: true,
+                title: {
+                  display: true,
+                  text: 'Amount Paid',
+                },
+                ticks: {
+                  callback: function(value: string | number) {
+                    return formatCurrency(parseFloat(value.toString()), currencyCode, customCurrencySymbol);
+                  }
+                }
+              },
+            },
+          },
+        });
+      }
+    } else {
+      // Destroy chart if not calculating Loan Payment or no amortization data
+      if (amortizationChartInstance.current) {
+        amortizationChartInstance.current.destroy();
+        amortizationChartInstance.current = null;
+      }
+    }
+
+    return () => {
+      if (amortizationChartInstance.current) {
+        amortizationChartInstance.current.destroy();
+        amortizationChartInstance.current = null;
+      }
+    };
+  }, [calculationTarget, amortizationSchedule, currencyCode, customCurrencySymbol, formatCurrency]);
+
+
   const createCurrentLoanScenario = useCallback((): LoanScenario | null => {
     if (
       calculationTarget === CalculationTarget.LOAN_PAYMENT &&
@@ -254,12 +370,56 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
     currencyCode, customCurrencySymbol, currentCalculatedInputs, savedLoanScenarios.length
   ]);
 
-  const handleSaveClick = () => {
+  const handleSaveLoanClick = () => {
     const currentScenario = createCurrentLoanScenario();
     if (currentScenario) {
       const scenarioName = prompt('Enter a name for this loan scenario:', currentScenario.name);
       if (scenarioName !== null && scenarioName.trim() !== '') {
         onSaveLoanScenario({ ...currentScenario, name: scenarioName.trim() });
+      } else if (scenarioName === null) {
+        // User cancelled
+      } else {
+        alert('Scenario name cannot be empty.');
+      }
+    }
+  };
+
+  const createCurrentInvestmentScenario = useCallback((): InvestmentScenario | null => {
+    if (
+      currentCalculatedInputs && calculationTarget !== undefined && calculationTarget !== CalculationTarget.LOAN_PAYMENT
+      && !errorMessage
+    ) {
+      return {
+        id: Date.now().toString(),
+        name: `Investment ${savedInvestmentScenarios.length + 1}`,
+        inputs: currentCalculatedInputs,
+        result: {
+          calculationTarget,
+          currencyCode,
+          customCurrencySymbol,
+          calculatedFutureValue,
+          calculatedPrincipal,
+          calculatedAnnualInterestRate,
+          calculatedTimePeriod,
+          realFutureValue,
+          growthData, // Include growth data for charts in comparison? Maybe not needed for simple summary.
+        }
+      };
+    }
+    return null;
+  }, [
+    currentCalculatedInputs, calculationTarget, errorMessage, currencyCode, customCurrencySymbol,
+    calculatedFutureValue, calculatedPrincipal, calculatedAnnualInterestRate, calculatedTimePeriod,
+    realFutureValue, growthData, savedInvestmentScenarios.length
+  ]);
+
+
+  const handleSaveInvestmentClick = () => {
+    const currentScenario = createCurrentInvestmentScenario();
+    if (currentScenario) {
+      const scenarioName = prompt('Enter a name for this investment scenario:', currentScenario.name);
+      if (scenarioName !== null && scenarioName.trim() !== '') {
+        onSaveInvestmentScenario({ ...currentScenario, name: scenarioName.trim() });
       } else if (scenarioName === null) {
         // User cancelled
       } else {
@@ -383,6 +543,9 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
     return null; // Fallback for invalid states for specific targets
   };
 
+  const isLoanMode = calculationTarget === CalculationTarget.LOAN_PAYMENT;
+  const isInvestmentMode = calculationTarget !== undefined && calculationTarget !== CalculationTarget.LOAN_PAYMENT;
+
 
   return (
     <div className="p-8 rounded-lg shadow-xl bg-white w-full max-w-lg mt-8 sm:mt-0 lg:ml-8">
@@ -397,11 +560,11 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
         <>
           {renderCalculatedValue()}
 
-          {/* Save Loan Scenario Button */}
-          {calculationTarget === CalculationTarget.LOAN_PAYMENT && calculatedMonthlyPayment !== null && (
+          {/* Save Scenario Buttons */}
+          {(isLoanMode && calculatedMonthlyPayment !== null) && (
             <div className="text-center mt-6">
               <button
-                onClick={handleSaveClick}
+                onClick={handleSaveLoanClick}
                 className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-full focus:outline-none focus:ring-4 focus:ring-green-300 transition duration-300 ease-in-out transform hover:scale-105"
               >
                 Save This Loan Scenario
@@ -409,8 +572,20 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
             </div>
           )}
 
+          {(isInvestmentMode && calculatedFutureValue !== null || calculatedPrincipal !== null || calculatedAnnualInterestRate !== null || calculatedTimePeriod !== null) && (
+             <div className="text-center mt-6">
+             <button
+               onClick={handleSaveInvestmentClick}
+               className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-full focus:outline-none focus:ring-4 focus:ring-green-300 transition duration-300 ease-in-out transform hover:scale-105"
+             >
+               Save This Investment Scenario
+             </button>
+           </div>
+          )}
+
+
           {/* Saved Loan Scenarios List */}
-          {savedLoanScenarios.length > 0 && (
+          {savedLoanScenarios.length > 0 && isLoanMode && (
             <div className="mt-8 pt-6 border-t border-gray-200">
               <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Saved Loan Scenarios</h3>
               <div className="space-y-4">
@@ -450,7 +625,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
           )}
 
           {/* Loan Comparison Table */}
-          {selectedScenarioForComparison.length > 1 && (
+          {selectedScenarioForComparison.length > 1 && isLoanMode && (
             <div className="mt-8 pt-6 border-t border-gray-200">
               <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Loan Comparison</h3>
               <div className="overflow-x-auto">
@@ -512,7 +687,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
           )}
 
           {/* Amortization Schedule (for the *currently displayed* loan) */}
-          {calculationTarget === CalculationTarget.LOAN_PAYMENT && amortizationSchedule && amortizationSchedule.length > 0 && (
+          {isLoanMode && amortizationSchedule && amortizationSchedule.length > 0 && (
             <div className="mt-8 pt-6 border-t border-gray-200">
               <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Amortization Schedule</h3>
               <div className="overflow-x-auto shadow-md rounded-lg">
@@ -542,8 +717,208 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
             </div>
           )}
 
+          {/* Amortization Chart (for the *currently displayed* loan) */}
+          {isLoanMode && amortizationSchedule && amortizationSchedule.length > 0 && (
+            <div className="mt-8">
+              <div className="relative h-72 w-full"> {/* Increased height for better visualization */}
+                <canvas ref={amortizationChartRef}></canvas>
+              </div>
+            </div>
+          )}
+
+          {/* Saved Investment Scenarios List */}
+          {savedInvestmentScenarios.length > 0 && isInvestmentMode && (
+            <div className="mt-8 pt-6 border-t border-gray-200">
+              <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Saved Investment Scenarios</h3>
+              <div className="space-y-4">
+                {savedInvestmentScenarios.map((scenario) => (
+                  <div key={scenario.id} className="p-4 bg-gray-50 rounded-lg shadow-md flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-gray-800">{scenario.name}</h4>
+                      <p className="text-sm text-gray-600">
+                        Target: {scenario.result.calculationTarget?.replace(/_/g, ' ')}
+                      </p>
+                      {scenario.result.calculatedFutureValue !== undefined && (
+                        <p className="text-sm text-gray-600">
+                          FV: {formatCurrency(scenario.result.calculatedFutureValue, scenario.result.currencyCode, scenario.result.customCurrencySymbol)}
+                        </p>
+                      )}
+                      {scenario.result.calculatedPrincipal !== undefined && (
+                        <p className="text-sm text-gray-600">
+                          PV: {formatCurrency(scenario.result.calculatedPrincipal, scenario.result.currencyCode, scenario.result.customCurrencySymbol)}
+                        </p>
+                      )}
+                      {scenario.result.calculatedAnnualInterestRate !== undefined && (
+                        <p className="text-sm text-gray-600">
+                          Rate: {formatPercentage(scenario.result.calculatedAnnualInterestRate)}
+                        </p>
+                      )}
+                      {scenario.result.calculatedTimePeriod !== undefined && (
+                        <p className="text-sm text-gray-600">
+                          Time: {formatYears(scenario.result.calculatedTimePeriod)}
+                        </p>
+                      )}
+                       {scenario.result.realFutureValue !== undefined && (
+                        <p className="text-sm text-gray-600">
+                          Real FV: {formatCurrency(scenario.result.realFutureValue, scenario.result.currencyCode, scenario.result.customCurrencySymbol)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedInvestmentForComparison.includes(scenario.id)}
+                        onChange={() => onToggleInvestmentScenarioForComparison(scenario.id)}
+                        className="form-checkbox h-5 w-5 text-blue-600 rounded"
+                        title="Select for comparison"
+                      />
+                      <button
+                        onClick={() => onRemoveInvestmentScenario(scenario.id)}
+                        className="text-red-500 hover:text-red-700"
+                        title="Remove scenario"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm6 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Investment Comparison Table */}
+          {selectedInvestmentForComparison.length > 1 && isInvestmentMode && (
+            <div className="mt-8 pt-6 border-t border-gray-200">
+              <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Investment Comparison</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Metric</th>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <th key={id} className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            {scenario.name}
+                          </th>
+                        ) : null;
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {/* Principal */}
+                    <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Principal</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-principal`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.principalInput !== undefined
+                              ? formatCurrency(scenario.inputs.principalInput, scenario.inputs.currencyCode, scenario.inputs.customCurrencySymbol)
+                              : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                     {/* Future Value */}
+                     <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Future Value</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-future-value`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.futureValueInput !== undefined
+                              ? formatCurrency(scenario.inputs.futureValueInput, scenario.inputs.currencyCode, scenario.inputs.customCurrencySymbol)
+                              : scenario.result.calculatedFutureValue !== undefined
+                                ? formatCurrency(scenario.result.calculatedFutureValue, scenario.result.currencyCode, scenario.result.customCurrencySymbol)
+                                : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                    {/* Annual Rate */}
+                    <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Annual Rate</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-rate`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.annualInterestRateInput !== undefined
+                              ? formatPercentage(scenario.inputs.annualInterestRateInput)
+                              : scenario.result.calculatedAnnualInterestRate !== undefined
+                                ? formatPercentage(scenario.result.calculatedAnnualInterestRate)
+                                : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                    {/* Time Period */}
+                    <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Time Period</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-time`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.timePeriodInput !== undefined
+                              ? formatYears(scenario.inputs.timePeriodInput)
+                              : scenario.result.calculatedTimePeriod !== undefined
+                                ? formatYears(scenario.result.calculatedTimePeriod)
+                                : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                    {/* Compounding Frequency */}
+                    <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Compounding</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-compounding`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.compoundingFrequency}x/year
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                     {/* Inflation Rate */}
+                     <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Inflation Rate</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-inflation`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.inputs.inflationRate !== undefined && scenario.inputs.inflationRate > 0
+                              ? formatPercentage(scenario.inputs.inflationRate)
+                              : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                    {/* Real Future Value */}
+                    <tr>
+                      <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">Real FV (Inflation Adj.)</td>
+                      {selectedInvestmentForComparison.map(id => {
+                        const scenario = savedInvestmentScenarios.find(s => s.id === id);
+                        return scenario ? (
+                          <td key={`${id}-real-fv`} className="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                            {scenario.result.realFutureValue !== undefined && scenario.result.realFutureValue !== null
+                              ? formatCurrency(scenario.result.realFutureValue, scenario.result.currencyCode, scenario.result.customCurrencySymbol)
+                              : '-'}
+                          </td>
+                        ) : null;
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+
           {!calculatedFutureValue && !calculatedPrincipal && !calculatedAnnualInterestRate && !calculatedTimePeriod &&
-            !calculatedMonthlyPayment && !calculatedTotalInterestPaid && !calculatedTotalAmountPaid && savedLoanScenarios.length === 0 && (
+            !calculatedMonthlyPayment && !calculatedTotalInterestPaid && !calculatedTotalAmountPaid && savedLoanScenarios.length === 0 && savedInvestmentScenarios.length === 0 && (
             <div className="text-center text-gray-500 italic">
               Enter your financial details and click 'Calculate' to see the results.
             </div>

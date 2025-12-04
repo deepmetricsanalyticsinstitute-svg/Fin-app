@@ -47,8 +47,8 @@ export interface InvestmentInputs {
   annualInterestRateInput?: number;
   timePeriodInput?: number;
   loanAmountInput?: number;
-  loanInterestRateInput?: number;
-  loanTermInput?: number;
+  loanInterestRateInput?: number; // Annual rate in percent
+  loanTermInput?: number; // in years
   compoundingFrequency: CompoundingFrequency; // Still present for investment targets
   currencyCode: string;
   customCurrencySymbol?: string;
@@ -74,4 +74,11 @@ export interface LoanScenario {
     currencyCode: string;
     customCurrencySymbol?: string;
   };
+}
+
+export interface InvestmentScenario {
+  id: string;
+  name: string;
+  inputs: InvestmentInputs;
+  result: CalculationResult;
 }

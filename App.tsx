@@ -3,13 +3,20 @@ import React, { useState, useCallback } from 'react';
 import InvestmentForm from './components/InvestmentForm';
 import ResultsDisplay from './components/ResultsDisplay';
 import { performFinancialCalculation } from './services/calculationService';
-import { CalculationResult, InvestmentInputs, LoanScenario } from './types';
+import { CalculationResult, InvestmentInputs, LoanScenario, InvestmentScenario } from './types';
 
 const App: React.FC = () => {
   const [calculationResult, setCalculationResult] = useState<CalculationResult | null>(null);
   const [currentCalculatedInputs, setCurrentCalculatedInputs] = useState<InvestmentInputs | null>(null);
+  
+  // Loan Comparison States
   const [savedLoanScenarios, setSavedLoanScenarios] = useState<LoanScenario[]>([]);
   const [selectedScenarioForComparison, setSelectedScenarioForComparison] = useState<string[]>([]);
+
+  // Investment Comparison States
+  const [savedInvestmentScenarios, setSavedInvestmentScenarios] = useState<InvestmentScenario[]>([]);
+  const [selectedInvestmentForComparison, setSelectedInvestmentForComparison] = useState<string[]>([]);
+
 
   const handleCalculate = useCallback((inputs: InvestmentInputs) => {
     const result = performFinancialCalculation(inputs);
@@ -17,6 +24,7 @@ const App: React.FC = () => {
     setCurrentCalculatedInputs(inputs); // Save the inputs that produced this result
   }, []);
 
+  // Loan Comparison Callbacks
   const addLoanScenario = useCallback((scenario: LoanScenario) => {
     setSavedLoanScenarios((prev) => [...prev, scenario]);
   }, []);
@@ -31,6 +39,23 @@ const App: React.FC = () => {
       prev.includes(id) ? prev.filter((_id) => _id !== id) : [...prev, id]
     );
   }, []);
+
+  // Investment Comparison Callbacks
+  const addInvestmentScenario = useCallback((scenario: InvestmentScenario) => {
+    setSavedInvestmentScenarios((prev) => [...prev, scenario]);
+  }, []);
+
+  const removeInvestmentScenario = useCallback((id: string) => {
+    setSavedInvestmentScenarios((prev) => prev.filter((s) => s.id !== id));
+    setSelectedInvestmentForComparison((prev) => prev.filter((_id) => _id !== id)); // Also remove from comparison if selected
+  }, []);
+
+  const toggleInvestmentScenarioForComparison = useCallback((id: string) => {
+    setSelectedInvestmentForComparison((prev) =>
+      prev.includes(id) ? prev.filter((_id) => _id !== id) : [...prev, id]
+    );
+  }, []);
+
 
   return (
     <div className="flex flex-col lg:flex-row items-center justify-center p-4">
@@ -58,6 +83,13 @@ const App: React.FC = () => {
         onRemoveLoanScenario={removeLoanScenario}
         selectedScenarioForComparison={selectedScenarioForComparison}
         onToggleScenarioForComparison={toggleScenarioForComparison}
+
+        // Props for investment comparison feature
+        onSaveInvestmentScenario={addInvestmentScenario}
+        savedInvestmentScenarios={savedInvestmentScenarios}
+        onRemoveInvestmentScenario={removeInvestmentScenario}
+        selectedInvestmentForComparison={selectedInvestmentForComparison}
+        onToggleInvestmentScenarioForComparison={toggleInvestmentScenarioForComparison}
       />
     </div>
   );

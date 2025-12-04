@@ -11,6 +11,9 @@ interface InputGroupProps {
   placeholder?: string;
   errorMessage?: string;
   icon?: React.ReactNode;
+  // Add onFocus and onBlur to the interface
+  onFocus?: (e: React.FocusEvent<HTMLInputElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
 }
 
 const InputGroup: React.FC<InputGroupProps> = ({
@@ -24,6 +27,9 @@ const InputGroup: React.FC<InputGroupProps> = ({
   placeholder,
   errorMessage,
   icon,
+  // Destructure onFocus and onBlur
+  onFocus,
+  onBlur,
 }) => {
   return (
     <div className="mb-4">
@@ -40,6 +46,9 @@ const InputGroup: React.FC<InputGroupProps> = ({
           min={min}
           step={step}
           placeholder={placeholder}
+          // Pass onFocus and onBlur to the input element
+          onFocus={onFocus}
+          onBlur={onBlur}
           className={`shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400 ${
             errorMessage ? 'border-red-500' : 'border-gray-300'
           } ${icon ? 'pl-10' : ''}`}
