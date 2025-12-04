@@ -1,0 +1,5 @@
+{
+  "name": "Investment Calculator",
+  "description": "A simple React web application to calculate the future value of an investment based on principal amount, interest rate, time period, and compounding frequency.",
+  "requestFramePermissions": []
+}
