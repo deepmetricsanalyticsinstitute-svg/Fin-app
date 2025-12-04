@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback } from 'react';
 import InvestmentForm from './components/InvestmentForm';
 import ResultsDisplay from './components/ResultsDisplay';
@@ -56,6 +57,14 @@ const App: React.FC = () => {
     );
   }, []);
 
+  // Clear History Callback
+  const handleClearHistory = useCallback(() => {
+    setSavedLoanScenarios([]);
+    setSelectedScenarioForComparison([]);
+    setSavedInvestmentScenarios([]);
+    setSelectedInvestmentForComparison([]);
+  }, []);
+
 
   return (
     <div className="flex flex-col lg:flex-row items-center justify-center p-4">
@@ -90,6 +99,9 @@ const App: React.FC = () => {
         onRemoveInvestmentScenario={removeInvestmentScenario}
         selectedInvestmentForComparison={selectedInvestmentForComparison}
         onToggleInvestmentScenarioForComparison={toggleInvestmentScenarioForComparison}
+
+        // Prop for clearing history
+        onClearHistory={handleClearHistory}
       />
     </div>
   );

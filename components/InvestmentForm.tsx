@@ -1,6 +1,7 @@
 
-import React, { useState, useCallback } from 'react';
-import { CompoundingFrequency, InvestmentInputs, CalculationTarget } from '../types';
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { CompoundingFrequency, InvestmentInputs, CalculationTarget, PaymentFrequency, FormState } from '../types';
 import InputGroup from './InputGroup';
 import SelectGroup from './SelectGroup';
 
@@ -22,33 +23,161 @@ const CALCULATION_TARGET_OPTIONS = [
   { value: CalculationTarget.PRINCIPAL, label: 'Present Value (PV)' },
   { value: CalculationTarget.ANNUAL_INTEREST_RATE, label: 'Annual Interest Rate (r)' },
   { value: CalculationTarget.TIME_PERIOD, label: 'Time Period (t)' },
-  { value: CalculationTarget.LOAN_PAYMENT, label: 'Loan Payment' }, // New option
+  { value: CalculationTarget.LOAN_PAYMENT, label: 'Loan Payment' },
 ];
 
+const PAYMENT_FREQUENCY_OPTIONS = [
+  { value: PaymentFrequency.MONTHLY, label: 'Monthly' },
+  { value: PaymentFrequency.BI_WEEKLY, label: 'Bi-weekly' },
+  { value: PaymentFrequency.WEEKLY, label: 'Weekly' },
+  { value: PaymentFrequency.ANNUALLY, label: 'Annually' },
+  { value: PaymentFrequency.SEMI_ANNUALLY, label: 'Semi-Annually' },
+  { value: PaymentFrequency.QUARTERLY, label: 'Quarterly' },
+];
+
+// Default values for form inputs
+const DEFAULT_CALC_TARGET = CalculationTarget.FUTURE_VALUE;
+const DEFAULT_PRINCIPAL = 10000;
+const DEFAULT_FUTURE_VALUE = 20000;
+const DEFAULT_ANNUAL_INTEREST_RATE = 5;
+const DEFAULT_TIME_PERIOD = 10;
+const DEFAULT_LOAN_AMOUNT = 100000;
+const DEFAULT_LOAN_INTEREST_RATE = 4.5;
+const DEFAULT_LOAN_TERM = 30;
+const DEFAULT_LOAN_PAYMENT_FREQUENCY = PaymentFrequency.MONTHLY;
+const DEFAULT_COMPOUNDING_FREQUENCY = CompoundingFrequency.ANNUALLY;
+const DEFAULT_CURRENCY_CODE = 'USD';
+const DEFAULT_CUSTOM_CURRENCY_SYMBOL = '';
+const DEFAULT_INFLATION_RATE = 0;
+
 const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
-  const [calculationTarget, setCalculationTarget] = useState<CalculationTarget>(CalculationTarget.FUTURE_VALUE);
-
-  const [principalInput, setPrincipalInput] = useState<number>(10000);
-  const [futureValueInput, setFutureValueInput] = useState<number>(20000);
-  const [annualInterestRateInput, setAnnualInterestRateInput] = useState<number>(5);
-  const [timePeriodInput, setTimePeriodInput] = useState<number>(10);
-
-  // New states for Loan Calculator
-  const [loanAmount, setLoanAmount] = useState<number>(100000);
-  const [loanInterestRate, setLoanInterestRate] = useState<number>(4.5); // Annual percentage
-  const [loanTerm, setLoanTerm] = useState<number>(30); // In years
-
-  const [compoundingFrequency, setCompoundingFrequency] = useState<CompoundingFrequency>(
-    CompoundingFrequency.ANNUALLY
-  );
-  const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string>('USD');
-  const [customCurrencySymbol, setCustomCurrencySymbol] = useState<string>('');
-  const [inflationRate, setInflationRate] = useState<number>(0);
+  const [calculationTarget, setCalculationTarget] = useState<CalculationTarget>(DEFAULT_CALC_TARGET);
+  const [principalInput, setPrincipalInput] = useState<number>(DEFAULT_PRINCIPAL);
+  const [futureValueInput, setFutureValueInput] = useState<number>(DEFAULT_FUTURE_VALUE);
+  const [annualInterestRateInput, setAnnualInterestRateInput] = useState<number>(DEFAULT_ANNUAL_INTEREST_RATE);
+  const [timePeriodInput, setTimePeriodInput] = useState<number>(DEFAULT_TIME_PERIOD);
+  const [loanAmount, setLoanAmount] = useState<number>(DEFAULT_LOAN_AMOUNT);
+  const [loanInterestRate, setLoanInterestRate] = useState<number>(DEFAULT_LOAN_INTEREST_RATE);
+  const [loanTerm, setLoanTerm] = useState<number>(DEFAULT_LOAN_TERM);
+  const [loanPaymentFrequency, setLoanPaymentFrequency] = useState<PaymentFrequency>(DEFAULT_LOAN_PAYMENT_FREQUENCY);
+  const [compoundingFrequency, setCompoundingFrequency] = useState<CompoundingFrequency>(DEFAULT_COMPOUNDING_FREQUENCY);
+  const [selectedCurrencyCode, setSelectedCurrencyCode] = useState<string>(DEFAULT_CURRENCY_CODE);
+  const [customCurrencySymbol, setCustomCurrencySymbol] = useState<string>(DEFAULT_CUSTOM_CURRENCY_SYMBOL);
+  const [inflationRate, setInflationRate] = useState<number>(DEFAULT_INFLATION_RATE);
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-
-  // State to track which input is focused for currency formatting
   const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
+
+  // Undo/Redo states and refs
+  const [history, setHistory] = useState<FormState[]>([]);
+  const [future, setFuture] = useState<FormState[]>([]);
+  // currentFormStateRef is no longer needed since pushCurrentStateToHistory will directly call getFormStateSnapshot()
+
+  const getFormStateSnapshot = useCallback((): FormState => ({
+    calculationTarget, principalInput, futureValueInput, annualInterestRateInput,
+    timePeriodInput, loanAmount, loanInterestRate, loanTerm, loanPaymentFrequency,
+    compoundingFrequency, selectedCurrencyCode, customCurrencySymbol, inflationRate,
+  }), [
+    calculationTarget, principalInput, futureValueInput, annualInterestRateInput,
+    timePeriodInput, loanAmount, loanInterestRate, loanTerm, loanPaymentFrequency,
+    compoundingFrequency, selectedCurrencyCode, customCurrencySymbol, inflationRate,
+  ]);
+
+  // Push initial state to history on mount, runs only once
+  // This was line 73, error "Expected 1 arguments, but got 0." might be related to
+  // this useEffect's dependencies potentially causing re-runs in a bad context.
+  // Changing dependencies to [] ensures it runs once on mount.
+  useEffect(() => {
+    if (history.length === 0) { // Ensure it only runs once
+      setHistory([getFormStateSnapshot()]);
+    }
+  }, []); // Empty dependency array means it runs once on mount
+
+  // This useEffect is no longer needed as pushCurrentStateToHistory will directly call getFormStateSnapshot()
+  // useEffect(() => {
+  //     currentFormStateRef.current = getFormStateSnapshot();
+  // }, [getFormStateSnapshot]);
+
+  const applyFormState = useCallback((state: FormState) => {
+    setCalculationTarget(state.calculationTarget);
+    setPrincipalInput(state.principalInput);
+    setFutureValueInput(state.futureValueInput);
+    setAnnualInterestRateInput(state.annualInterestRateInput);
+    setTimePeriodInput(state.timePeriodInput);
+    setLoanAmount(state.loanAmount);
+    setLoanInterestRate(state.loanInterestRate);
+    setLoanTerm(state.loanTerm);
+    setLoanPaymentFrequency(state.loanPaymentFrequency);
+    setCompoundingFrequency(state.compoundingFrequency);
+    setSelectedCurrencyCode(state.selectedCurrencyCode);
+    setCustomCurrencySymbol(state.customCurrencySymbol);
+    setInflationRate(state.inflationRate);
+    setErrors({}); // Clear errors when applying history
+    setFocusedInputId(null); // Unfocus any input
+  }, []); // Dependencies are stable setters
+
+  const pushCurrentStateToHistory = useCallback(() => {
+    // Correctly capture the latest state using getFormStateSnapshot()
+    const latestSnapshot = getFormStateSnapshot();
+    if (!latestSnapshot) return;
+
+    const lastInHistory = history[history.length - 1];
+    // Avoid pushing identical consecutive states
+    if (lastInHistory && JSON.stringify(latestSnapshot) === JSON.stringify(lastInHistory)) {
+      return;
+    }
+
+    setHistory(prev => [...prev, latestSnapshot]);
+    setFuture([]); // Clear future when a new action is performed
+  }, [history, getFormStateSnapshot]);
+
+  const handleUndo = useCallback(() => {
+    if (history.length <= 1) return; // Cannot undo beyond initial state
+
+    // The state we are currently looking at (before undo)
+    const currentStateSnapshot = getFormStateSnapshot();
+    if (!currentStateSnapshot) return;
+
+    // The state we want to revert to
+    const previousStateSnapshot = history[history.length - 2];
+    if (!previousStateSnapshot) return;
+
+    // 1. Add the current state to the 'future' stack for redo
+    setFuture(prev => [currentStateSnapshot, ...prev]);
+
+    // 2. Remove the last state (which is the current one) from history
+    setHistory(prev => prev.slice(0, prev.length - 1));
+
+    // 3. Apply the previous state to the form
+    applyFormState(previousStateSnapshot);
+
+    setErrors({});
+    setFocusedInputId(null);
+  }, [history, applyFormState, getFormStateSnapshot]);
+
+  const handleRedo = useCallback(() => {
+    if (future.length === 0) return;
+
+    // The state we want to move forward to
+    const nextStateSnapshot = future[0];
+
+    // The state we are currently looking at (before redo)
+    const currentStateSnapshot = getFormStateSnapshot();
+    if (!currentStateSnapshot) return;
+
+    // 1. Add the current state to the 'history' stack
+    setHistory(prev => [...prev, currentStateSnapshot]);
+
+    // 2. Remove the state we just applied from 'future'
+    setFuture(prev => prev.slice(1));
+
+    // 3. Apply the next state to the form
+    applyFormState(nextStateSnapshot);
+
+    setErrors({});
+    setFocusedInputId(null);
+  }, [future, applyFormState, getFormStateSnapshot]);
+
 
   const validate = useCallback(() => {
     const newErrors: { [key: string]: string } = {};
@@ -62,7 +191,6 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     const checkValueTooHigh = (value: number | undefined, key: string, label: string, limit: number) => {
       if (value !== undefined && value > limit) newErrors[key] = `${label} seems unusually high (>${limit}).`;
     };
-
 
     switch (calculationTarget) {
       case CalculationTarget.FUTURE_VALUE:
@@ -88,7 +216,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         checkValueTooHigh(timePeriodInput, 'timePeriodInput', 'Time period', 100);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         if (futureValueInput !== undefined && principalInput !== undefined && futureValueInput < principalInput) {
-          newErrors.futureValueInput = 'Future value must be greater than or equal to principal.';
+          newErrors.futureValueInput = 'Future value must be greater than or equal to principal for a positive interest rate.';
         }
         break;
       case CalculationTarget.TIME_PERIOD:
@@ -98,10 +226,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         checkValueTooHigh(annualInterestRateInput, 'annualInterestRateInput', 'Annual interest rate', 500);
         checkPositive(compoundingFrequency, 'compoundingFrequency', 'Compounding frequency');
         if (futureValueInput !== undefined && principalInput !== undefined && futureValueInput < principalInput) {
-          newErrors.futureValueInput = 'Future value must be greater than or equal to principal.';
+          newErrors.futureValueInput = 'Future value must be greater than or equal to principal for a positive time period.';
         }
         break;
-      case CalculationTarget.LOAN_PAYMENT: // New case for Loan Calculator
+      case CalculationTarget.LOAN_PAYMENT:
         checkPositive(loanAmount, 'loanAmount', 'Loan amount');
         checkNonNegative(loanInterestRate, 'loanInterestRate', 'Loan interest rate');
         checkValueTooHigh(loanInterestRate, 'loanInterestRate', 'Loan interest rate', 500);
@@ -125,9 +253,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     timePeriodInput,
     compoundingFrequency,
     inflationRate,
-    loanAmount, // Add loan inputs to dependencies
+    loanAmount,
     loanInterestRate,
     loanTerm,
+    loanPaymentFrequency,
   ]);
 
   const formatNumberForInputDisplay = useCallback((amount: number | string) => {
@@ -139,22 +268,20 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     if (customSymbol && customSymbol.trim() !== '') {
       return `e.g., ${customSymbol.trim()}10,000.00`;
     }
-    // Attempt to get the actual currency symbol from Intl.NumberFormat
     try {
       const formatter = new Intl.NumberFormat(undefined, {
         style: 'currency',
         currency: code,
-        minimumFractionDigits: 0, // To get just the symbol
-        maximumFractionDigits: 0, // To get just the symbol
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
       });
-      // Extract the symbol by formatting 0 and taking what's before/after
       const parts = formatter.formatToParts(0);
       const symbolPart = parts.find(part => part.type === 'currency');
-      const symbol = symbolPart ? symbolPart.value : code; // Fallback to code if symbol not found
+      const symbol = symbolPart ? symbolPart.value : code;
       return `e.g., ${symbol}10,000.00`;
     } catch (e) {
       console.warn('Error getting currency symbol for placeholder:', e);
-      return `e.g., $10,000.00`; // Default fallback
+      return `e.g., $10,000.00`;
     }
   }, []);
 
@@ -165,11 +292,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
   }, []);
 
   const parseNumberInput = useCallback((value: string, setter: React.Dispatch<React.SetStateAction<number>>, minAllowed: number = 0) => {
-    const cleanedValue = value.replace(/[^0-9.]/g, ''); // Allow only numbers and dot
+    const cleanedValue = value.replace(/[^0-9.]/g, '');
     const numValue = parseFloat(cleanedValue);
     setter(isNaN(numValue) || value === '' ? minAllowed : numValue);
   }, []);
-
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -197,12 +323,13 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             inflationRate: inflationRate,
           };
           break;
-        case CalculationTarget.LOAN_PAYMENT: // For Loan Calculator
+        case CalculationTarget.LOAN_PAYMENT:
           inputs = {
             ...commonInputs,
             loanAmountInput: loanAmount,
             loanInterestRateInput: loanInterestRate,
             loanTermInput: loanTerm,
+            paymentFrequency: loanPaymentFrequency,
           };
           break;
         default:
@@ -213,11 +340,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     }
   }, [
     calculationTarget, principalInput, futureValueInput, annualInterestRateInput, timePeriodInput,
-    loanAmount, loanInterestRate, loanTerm, // Add loan inputs to dependencies
+    loanAmount, loanInterestRate, loanTerm, loanPaymentFrequency,
     compoundingFrequency, selectedCurrencyCode, customCurrencySymbol, inflationRate,
     validate, onCalculate
   ]);
-
 
   const compoundingOptions = [
     { value: CompoundingFrequency.ANNUALLY, label: 'Annually' },
@@ -227,18 +353,72 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     { value: CompoundingFrequency.DAILY, label: 'Daily' },
   ];
 
+  const initialFormState: FormState = {
+    calculationTarget: DEFAULT_CALC_TARGET,
+    principalInput: DEFAULT_PRINCIPAL,
+    futureValueInput: DEFAULT_FUTURE_VALUE,
+    annualInterestRateInput: DEFAULT_ANNUAL_INTEREST_RATE,
+    timePeriodInput: DEFAULT_TIME_PERIOD,
+    loanAmount: DEFAULT_LOAN_AMOUNT,
+    loanInterestRate: DEFAULT_LOAN_INTEREST_RATE,
+    loanTerm: DEFAULT_LOAN_TERM,
+    loanPaymentFrequency: DEFAULT_LOAN_PAYMENT_FREQUENCY,
+    compoundingFrequency: DEFAULT_COMPOUNDING_FREQUENCY,
+    selectedCurrencyCode: DEFAULT_CURRENCY_CODE,
+    customCurrencySymbol: DEFAULT_CUSTOM_CURRENCY_SYMBOL,
+    inflationRate: DEFAULT_INFLATION_RATE,
+  };
+
+  const handleReset = useCallback(() => {
+    applyFormState(initialFormState); // Apply the original initial state
+    setErrors({});
+    setFocusedInputId(null);
+    setHistory([initialFormState]); // Reset history to just the initial state
+    setFuture([]); // Clear future
+  }, [applyFormState, initialFormState]); // Depend on applyFormState and initialFormState
+
   const isInvestmentMode = calculationTarget !== CalculationTarget.LOAN_PAYMENT;
 
   return (
     <form onSubmit={handleSubmit} className="p-8 rounded-lg shadow-xl bg-white w-full max-w-lg">
       <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">Financial Calculator</h2>
 
+      {/* Undo/Redo Buttons */}
+      <div className="flex justify-center space-x-4 mb-6">
+        <button
+          type="button"
+          onClick={handleUndo}
+          disabled={history.length <= 1} // Disable if only initial state or empty
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full focus:outline-none focus:ring-4 focus:ring-blue-300 transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12.000001,8.000001 L8,12 L12.000001,16 M6.000001,12 L19.000001,12" transform="matrix(-1 0 0 1 25 0)"></path>
+          </svg>
+          Undo
+        </button>
+        <button
+          type="button"
+          onClick={handleRedo}
+          disabled={future.length === 0}
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full focus:outline-none focus:ring-4 focus:ring-blue-300 transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Redo
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline-block ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12.000001,8.000001 L8,12 L12.000001,16 M6.000001,12 L19.000001,12"></path>
+          </svg>
+        </button>
+      </div>
+
+
       {/* Solve For */}
       <SelectGroup
         label="Solve For"
         id="calculationTarget"
         value={calculationTarget}
-        onChange={(e) => setCalculationTarget(e.target.value as CalculationTarget)}
+        onChange={(e) => {
+          setCalculationTarget(e.target.value as CalculationTarget);
+          pushCurrentStateToHistory(); // Push history after state updates (ref updates)
+        }}
         options={CALCULATION_TARGET_OPTIONS}
         icon={
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -252,7 +432,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         label="Currency"
         id="currency"
         value={selectedCurrencyCode}
-        onChange={(e) => setSelectedCurrencyCode(e.target.value)}
+        onChange={(e) => {
+          setSelectedCurrencyCode(e.target.value);
+          pushCurrentStateToHistory();
+        }}
         options={CURRENCY_OPTIONS}
         icon={
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -268,6 +451,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         type="text"
         value={customCurrencySymbol}
         onChange={(e) => setCustomCurrencySymbol(e.target.value)}
+        onBlur={pushCurrentStateToHistory} // Push on blur for text inputs
         placeholder="e.g., £, €, Kr"
         errorMessage={errors.customCurrencySymbol}
         icon={
@@ -290,7 +474,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
               errorMessage={errors.principalInput}
               onFocus={() => setFocusedInputId('principalInput')}
-              onBlur={() => setFocusedInputId(null)}
+              onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
                   <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
@@ -311,7 +495,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
               errorMessage={errors.futureValueInput}
               onFocus={() => setFocusedInputId('futureValueInput')}
-              onBlur={() => setFocusedInputId(null)}
+              onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
                   <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
@@ -327,12 +511,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               label="Annual Interest Rate (%)"
               id="annualInterestRateInput"
               type="number"
-              value={annualInterestRateInput}
+              value={annualInterestRateInput === 0 && (focusedInputId !== 'annualInterestRateInput') ? '' : annualInterestRateInput}
               onChange={(e) => parseNumberInput(e.target.value, setAnnualInterestRateInput)}
               min={0}
               step="0.01"
               placeholder="e.g., 5"
               errorMessage={errors.annualInterestRateInput}
+              onFocus={() => setFocusedInputId('annualInterestRateInput')}
+              onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.004.996a2.002 2.002 0 012.83 0L14 10.17V5h5a2 2 0 012 2v5l1.17-1.17a2.002 2.002 0 010 2.83L12 22l-7.17-7.17a2.002 2.002 0 010-2.83l.83-.83H5a2 2 0 01-2-2V7a2 2 0 012-2h5l-2.17 2.17a2.002 2.002 0 010 2.83L9 14z" />
@@ -347,12 +533,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
               label="Time Period (Years)"
               id="timePeriodInput"
               type="number"
-              value={timePeriodInput}
+              value={timePeriodInput === 0 && (focusedInputId !== 'timePeriodInput') ? '' : timePeriodInput}
               onChange={(e) => parseNumberInput(e.target.value, setTimePeriodInput, 1)}
               min={1}
               step="1"
               placeholder="e.g., 10"
               errorMessage={errors.timePeriodInput}
+              onFocus={() => setFocusedInputId('timePeriodInput')}
+              onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
               icon={
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -365,7 +553,10 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Compounding Frequency"
             id="compoundingFrequency"
             value={compoundingFrequency}
-            onChange={(e) => setCompoundingFrequency(parseInt(e.target.value, 10) as CompoundingFrequency)}
+            onChange={(e) => {
+              setCompoundingFrequency(parseInt(e.target.value, 10) as CompoundingFrequency);
+              pushCurrentStateToHistory();
+            }}
             options={compoundingOptions}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -379,14 +570,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Assumed Inflation Rate (%) (Optional)"
             id="inflationRate"
             type="number"
-            value={inflationRate === 0 && (focusedInputId !== 'inflationRate') ? '' : inflationRate} // Display empty if 0 and not focused
+            value={inflationRate === 0 && (focusedInputId !== 'inflationRate') ? '' : inflationRate}
             onChange={(e) => parseNumberInput(e.target.value, setInflationRate)}
             min={0}
             step="0.01"
             placeholder="e.g., 2"
             errorMessage={errors.inflationRate}
             onFocus={() => setFocusedInputId('inflationRate')}
-            onBlur={() => setFocusedInputId(null)}
+            onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM8.25 15.75L15.75 8.25"></path>
@@ -406,7 +597,7 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             placeholder={getCurrencyPlaceholder(selectedCurrencyCode, customCurrencySymbol)}
             errorMessage={errors.loanAmount}
             onFocus={() => setFocusedInputId('loanAmount')}
-            onBlur={() => setFocusedInputId(null)}
+            onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
                 <path d="M12 8.25a3.75 3.75 0 100 7.5 3.75 3.75 0 000-7.5Z" />
@@ -420,14 +611,14 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Annual Interest Rate (%)"
             id="loanInterestRate"
             type="number"
-            value={loanInterestRate === 0 && (focusedInputId !== 'loanInterestRate') ? '' : loanInterestRate} // Display empty if 0 and not focused
+            value={loanInterestRate === 0 && (focusedInputId !== 'loanInterestRate') ? '' : loanInterestRate}
             onChange={(e) => parseNumberInput(e.target.value, setLoanInterestRate)}
             min={0}
             step="0.01"
             placeholder="e.g., 4.5"
             errorMessage={errors.loanInterestRate}
             onFocus={() => setFocusedInputId('loanInterestRate')}
-            onBlur={() => setFocusedInputId(null)}
+            onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 14l6-6m-5.004.996a2.002 2.002 0 012.83 0L14 10.17V5h5a2 2 0 012 2v5l1.17-1.17a2.002 2.002 0 010 2.83L12 22l-7.17-7.17a2.002 2.002 0 010-2.83l.83-.83H5a2 2 0 01-2-2V7a2 2 0 012-2h5l-2.17 2.17a2.002 2.002 0 010 2.83L9 14z" />
@@ -440,23 +631,39 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
             label="Loan Term (Years)"
             id="loanTerm"
             type="number"
-            value={loanTerm === 0 && (focusedInputId !== 'loanTerm') ? '' : loanTerm} // Display empty if 0 and not focused
+            value={loanTerm === 0 && (focusedInputId !== 'loanTerm') ? '' : loanTerm}
             onChange={(e) => parseNumberInput(e.target.value, setLoanTerm, 1)}
             min={1}
             step="1"
             placeholder="e.g., 30"
             errorMessage={errors.loanTerm}
             onFocus={() => setFocusedInputId('loanTerm')}
-            onBlur={() => setFocusedInputId(null)}
+            onBlur={() => {setFocusedInputId(null); pushCurrentStateToHistory();}}
             icon={
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             }
           />
+
+          {/* Loan Payment Frequency Input */}
+          <SelectGroup
+            label="Payment Frequency"
+            id="loanPaymentFrequency"
+            value={loanPaymentFrequency}
+            onChange={(e) => {
+              setLoanPaymentFrequency(parseInt(e.target.value, 10) as PaymentFrequency);
+              pushCurrentStateToHistory();
+            }}
+            options={PAYMENT_FREQUENCY_OPTIONS}
+            icon={
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            }
+          />
         </>
       )}
-
 
       <div className="flex items-center justify-center mt-6">
         <button
@@ -464,6 +671,13 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-full focus:outline-none focus:ring-4 focus:ring-blue-300 transition duration-300 ease-in-out transform hover:scale-105"
         >
           Calculate
+        </button>
+        <button
+          type="button"
+          onClick={handleReset}
+          className="ml-4 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-3 px-6 rounded-full focus:outline-none focus:ring-4 focus:ring-gray-200 transition duration-300 ease-in-out transform hover:scale-105"
+        >
+          Reset Form
         </button>
       </div>
     </form>

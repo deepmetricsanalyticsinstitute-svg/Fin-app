@@ -1,5 +1,6 @@
 
-import { CompoundingFrequency, CalculationResult, InvestmentInputs, CalculationTarget, AmortizationEntry } from '../types';
+
+import { CompoundingFrequency, CalculationResult, InvestmentInputs, CalculationTarget, AmortizationEntry, PaymentFrequency } from '../types';
 
 /**
  * Helper function to calculate Future Value
@@ -124,6 +125,7 @@ const _calculateLoanPayment = (
   loanAmount: number,
   loanInterestRate: number, // Annual rate in percent
   loanTerm: number, // in years
+  paymentFrequency: PaymentFrequency, // New parameter
   currencyCode: string,
   customCurrencySymbol?: string,
 ): CalculationResult => {
@@ -131,36 +133,36 @@ const _calculateLoanPayment = (
   if (loanInterestRate < 0) return { calculatedMonthlyPayment: 0, calculatedTotalInterestPaid: 0, calculatedTotalAmountPaid: 0, currencyCode, customCurrencySymbol, error: 'Loan interest rate cannot be negative.', calculationTarget: CalculationTarget.LOAN_PAYMENT };
   if (loanTerm <= 0) return { calculatedMonthlyPayment: 0, calculatedTotalInterestPaid: 0, calculatedTotalAmountPaid: 0, currencyCode, customCurrencySymbol, error: 'Loan term must be positive.', calculationTarget: CalculationTarget.LOAN_PAYMENT };
 
-  const monthlyInterestRate = (loanInterestRate / 100) / 12;
-  const numberOfPayments = loanTerm * 12;
+  const periodicInterestRate = (loanInterestRate / 100) / paymentFrequency; // Use paymentFrequency
+  const numberOfPayments = loanTerm * paymentFrequency; // Use paymentFrequency
 
-  let calculatedMonthlyPayment: number;
-  if (monthlyInterestRate === 0) {
-    calculatedMonthlyPayment = loanAmount / numberOfPayments;
+  let calculatedPeriodicPayment: number;
+  if (periodicInterestRate === 0) {
+    calculatedPeriodicPayment = loanAmount / numberOfPayments;
   } else {
-    calculatedMonthlyPayment = loanAmount * (monthlyInterestRate * Math.pow(1 + monthlyInterestRate, numberOfPayments)) / (Math.pow(1 + monthlyInterestRate, numberOfPayments) - 1);
+    calculatedPeriodicPayment = loanAmount * (periodicInterestRate * Math.pow(1 + periodicInterestRate, numberOfPayments)) / (Math.pow(1 + periodicInterestRate, numberOfPayments) - 1);
   }
 
-  const calculatedTotalAmountPaid = calculatedMonthlyPayment * numberOfPayments;
-  const calculatedTotalInterestPaid = calculatedTotalAmountPaid - loanAmount;
+  let calculatedTotalAmountPaid = calculatedPeriodicPayment * numberOfPayments;
+  let calculatedTotalInterestPaid = calculatedTotalAmountPaid - loanAmount;
 
   // Generate Amortization Schedule
   const amortizationSchedule: AmortizationEntry[] = [];
   let currentBalance = loanAmount;
-  let totalInterest = 0;
+  let totalInterestAccumulated = 0; // Track accumulated interest for the total
 
   for (let i = 1; i <= numberOfPayments; i++) {
-    const interestPayment = currentBalance * monthlyInterestRate;
-    let principalPayment = calculatedMonthlyPayment - interestPayment;
+    const interestPayment = currentBalance * periodicInterestRate;
+    let principalPayment = calculatedPeriodicPayment - interestPayment;
 
     // Adjust last payment to account for floating point errors
     if (i === numberOfPayments) {
       principalPayment = currentBalance; // Pay off remaining balance
-      calculatedMonthlyPayment = currentBalance + interestPayment; // Adjust final monthly payment
+      calculatedPeriodicPayment = currentBalance + interestPayment; // Adjust final periodic payment
     }
 
     currentBalance -= principalPayment;
-    totalInterest += interestPayment;
+    totalInterestAccumulated += interestPayment;
 
     amortizationSchedule.push({
       paymentNumber: i,
@@ -171,15 +173,16 @@ const _calculateLoanPayment = (
     });
   }
 
-  // Recalculate total interest and amount paid based on adjusted monthly payment for last iteration
-  const finalCalculatedTotalAmountPaid = amortizationSchedule.reduce((sum, entry) => sum + (entry.interestPaid + entry.principalPaid), 0);
-  const finalCalculatedTotalInterestPaid = finalCalculatedTotalAmountPaid - loanAmount;
+  // Recalculate total interest and amount paid based on the final, potentially adjusted, periodic payment
+  // This helps account for the adjustment in the last payment
+  calculatedTotalAmountPaid = amortizationSchedule.reduce((sum, entry) => sum + entry.interestPaid + entry.principalPaid, 0);
+  calculatedTotalInterestPaid = calculatedTotalAmountPaid - loanAmount;
 
 
   return {
-    calculatedMonthlyPayment: calculatedMonthlyPayment, // Use the adjusted one for the last payment too
-    calculatedTotalInterestPaid: finalCalculatedTotalInterestPaid,
-    calculatedTotalAmountPaid: finalCalculatedTotalAmountPaid,
+    calculatedMonthlyPayment: calculatedPeriodicPayment, // Store periodic payment here
+    calculatedTotalInterestPaid: calculatedTotalInterestPaid,
+    calculatedTotalAmountPaid: calculatedTotalAmountPaid,
     currencyCode,
     customCurrencySymbol,
     calculationTarget: CalculationTarget.LOAN_PAYMENT,
@@ -202,6 +205,7 @@ export const performFinancialCalculation = ({
   loanAmountInput, // New loan inputs
   loanInterestRateInput, // New loan inputs
   loanTermInput, // New loan inputs
+  paymentFrequency, // Added for loan calculations
   compoundingFrequency,
   currencyCode,
   customCurrencySymbol,
@@ -257,6 +261,7 @@ export const performFinancialCalculation = ({
         loanAmountInput!,
         loanInterestRateInput!,
         loanTermInput!,
+        paymentFrequency!, // Pass paymentFrequency
         currencyCode,
         customCurrencySymbol,
       );
