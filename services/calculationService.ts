@@ -1,4 +1,5 @@
-import { CompoundingFrequency, CalculationResult, InvestmentInputs, CalculationTarget } from '../types';
+
+import { CompoundingFrequency, CalculationResult, InvestmentInputs, CalculationTarget, AmortizationEntry } from '../types';
 
 /**
  * Helper function to calculate Future Value
@@ -117,6 +118,76 @@ const _calculateTimePeriod = (
 };
 
 /**
+ * Helper function to calculate Loan Payment and Amortization Schedule
+ */
+const _calculateLoanPayment = (
+  loanAmount: number,
+  loanInterestRate: number, // Annual rate in percent
+  loanTerm: number, // in years
+  currencyCode: string,
+  customCurrencySymbol?: string,
+): CalculationResult => {
+  if (loanAmount <= 0) return { calculatedMonthlyPayment: 0, calculatedTotalInterestPaid: 0, calculatedTotalAmountPaid: 0, currencyCode, customCurrencySymbol, error: 'Loan amount must be positive.', calculationTarget: CalculationTarget.LOAN_PAYMENT };
+  if (loanInterestRate < 0) return { calculatedMonthlyPayment: 0, calculatedTotalInterestPaid: 0, calculatedTotalAmountPaid: 0, currencyCode, customCurrencySymbol, error: 'Loan interest rate cannot be negative.', calculationTarget: CalculationTarget.LOAN_PAYMENT };
+  if (loanTerm <= 0) return { calculatedMonthlyPayment: 0, calculatedTotalInterestPaid: 0, calculatedTotalAmountPaid: 0, currencyCode, customCurrencySymbol, error: 'Loan term must be positive.', calculationTarget: CalculationTarget.LOAN_PAYMENT };
+
+  const monthlyInterestRate = (loanInterestRate / 100) / 12;
+  const numberOfPayments = loanTerm * 12;
+
+  let calculatedMonthlyPayment: number;
+  if (monthlyInterestRate === 0) {
+    calculatedMonthlyPayment = loanAmount / numberOfPayments;
+  } else {
+    calculatedMonthlyPayment = loanAmount * (monthlyInterestRate * Math.pow(1 + monthlyInterestRate, numberOfPayments)) / (Math.pow(1 + monthlyInterestRate, numberOfPayments) - 1);
+  }
+
+  const calculatedTotalAmountPaid = calculatedMonthlyPayment * numberOfPayments;
+  const calculatedTotalInterestPaid = calculatedTotalAmountPaid - loanAmount;
+
+  // Generate Amortization Schedule
+  const amortizationSchedule: AmortizationEntry[] = [];
+  let currentBalance = loanAmount;
+  let totalInterest = 0;
+
+  for (let i = 1; i <= numberOfPayments; i++) {
+    const interestPayment = currentBalance * monthlyInterestRate;
+    let principalPayment = calculatedMonthlyPayment - interestPayment;
+
+    // Adjust last payment to account for floating point errors
+    if (i === numberOfPayments) {
+      principalPayment = currentBalance; // Pay off remaining balance
+      calculatedMonthlyPayment = currentBalance + interestPayment; // Adjust final monthly payment
+    }
+
+    currentBalance -= principalPayment;
+    totalInterest += interestPayment;
+
+    amortizationSchedule.push({
+      paymentNumber: i,
+      startingBalance: currentBalance + principalPayment, // Balance before this payment
+      interestPaid: interestPayment,
+      principalPaid: principalPayment,
+      endingBalance: Math.max(0, currentBalance), // Ensure ending balance is not negative
+    });
+  }
+
+  // Recalculate total interest and amount paid based on adjusted monthly payment for last iteration
+  const finalCalculatedTotalAmountPaid = amortizationSchedule.reduce((sum, entry) => sum + (entry.interestPaid + entry.principalPaid), 0);
+  const finalCalculatedTotalInterestPaid = finalCalculatedTotalAmountPaid - loanAmount;
+
+
+  return {
+    calculatedMonthlyPayment: calculatedMonthlyPayment, // Use the adjusted one for the last payment too
+    calculatedTotalInterestPaid: finalCalculatedTotalInterestPaid,
+    calculatedTotalAmountPaid: finalCalculatedTotalAmountPaid,
+    currencyCode,
+    customCurrencySymbol,
+    calculationTarget: CalculationTarget.LOAN_PAYMENT,
+    amortizationSchedule: amortizationSchedule,
+  };
+};
+
+/**
  * Performs a financial calculation based on the specified target.
  *
  * @param inputs The investment inputs including the calculation target.
@@ -128,6 +199,9 @@ export const performFinancialCalculation = ({
   futureValueInput,
   annualInterestRateInput,
   timePeriodInput,
+  loanAmountInput, // New loan inputs
+  loanInterestRateInput, // New loan inputs
+  loanTermInput, // New loan inputs
   compoundingFrequency,
   currencyCode,
   customCurrencySymbol,
@@ -174,6 +248,15 @@ export const performFinancialCalculation = ({
         futureValueInput!,
         annualInterestRateInput!,
         compoundingFrequency,
+        currencyCode,
+        customCurrencySymbol,
+      );
+      break;
+    case CalculationTarget.LOAN_PAYMENT: // New case for Loan Payment
+      result = _calculateLoanPayment(
+        loanAmountInput!,
+        loanInterestRateInput!,
+        loanTermInput!,
         currencyCode,
         customCurrencySymbol,
       );

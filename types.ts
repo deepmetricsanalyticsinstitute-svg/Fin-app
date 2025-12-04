@@ -1,3 +1,4 @@
+
 export enum CompoundingFrequency {
   ANNUALLY = 1,
   SEMI_ANNUALLY = 2,
@@ -11,6 +12,15 @@ export enum CalculationTarget {
   PRINCIPAL = 'PRINCIPAL',
   ANNUAL_INTEREST_RATE = 'ANNUAL_INTEREST_RATE',
   TIME_PERIOD = 'TIME_PERIOD',
+  LOAN_PAYMENT = 'LOAN_PAYMENT',
+}
+
+export interface AmortizationEntry {
+  paymentNumber: number;
+  startingBalance: number;
+  interestPaid: number;
+  principalPaid: number;
+  endingBalance: number;
 }
 
 export interface CalculationResult {
@@ -18,22 +28,50 @@ export interface CalculationResult {
   calculatedPrincipal?: number;
   calculatedAnnualInterestRate?: number;
   calculatedTimePeriod?: number;
+  calculatedMonthlyPayment?: number;
+  calculatedTotalInterestPaid?: number;
+  calculatedTotalAmountPaid?: number;
   currencyCode: string;
   customCurrencySymbol?: string;
   error?: string;
   growthData?: { year: number; value: number; }[];
   realFutureValue?: number;
-  calculationTarget?: CalculationTarget; // Added to store which target was calculated
+  calculationTarget?: CalculationTarget;
+  amortizationSchedule?: AmortizationEntry[];
 }
 
 export interface InvestmentInputs {
   calculationTarget: CalculationTarget;
-  principalInput?: number; // Optional as it might be the target
-  futureValueInput?: number; // Optional as it might be the target
-  annualInterestRateInput?: number; // Optional as it might be the target
-  timePeriodInput?: number; // Optional as it might be the target
-  compoundingFrequency: CompoundingFrequency;
+  principalInput?: number;
+  futureValueInput?: number;
+  annualInterestRateInput?: number;
+  timePeriodInput?: number;
+  loanAmountInput?: number;
+  loanInterestRateInput?: number;
+  loanTermInput?: number;
+  compoundingFrequency: CompoundingFrequency; // Still present for investment targets
   currencyCode: string;
   customCurrencySymbol?: string;
   inflationRate?: number;
+}
+
+export interface LoanInputs {
+  loanAmountInput: number;
+  loanInterestRateInput: number; // Annual rate in percent
+  loanTermInput: number; // in years
+  currencyCode: string;
+  customCurrencySymbol?: string;
+}
+
+export interface LoanScenario {
+  id: string;
+  name: string;
+  inputs: LoanInputs;
+  result: {
+    calculatedMonthlyPayment: number;
+    calculatedTotalInterestPaid: number;
+    calculatedTotalAmountPaid: number;
+    currencyCode: string;
+    customCurrencySymbol?: string;
+  };
 }
