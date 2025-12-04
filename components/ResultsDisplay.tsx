@@ -19,7 +19,6 @@ interface ResultsDisplayProps {
   customCurrencySymbol?: string;
   growthData?: { year: number; value: number; }[];
   realFutureValue?: number | null;
-  voiceNoteTranscript?: string; // New: Voice note transcript
 }
 
 const ANIMATION_DURATION_MS = 1000; // Animation duration in milliseconds
@@ -35,7 +34,6 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
   customCurrencySymbol,
   growthData,
   realFutureValue = null,
-  voiceNoteTranscript,
 }) => {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null); // To store the Chart.js instance
@@ -291,13 +289,7 @@ const ResultsDisplay: React.FC<ResultsDisplayProps> = ({
       ) : (
         <>
           {renderCalculatedValue()}
-          {voiceNoteTranscript && (
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <p className="text-lg text-gray-700 mb-2">Your Voice Note:</p>
-              <p className="text-gray-800 italic">{voiceNoteTranscript}</p>
-            </div>
-          )}
-          {!calculatedFutureValue && !calculatedPrincipal && !calculatedAnnualInterestRate && !calculatedTimePeriod && !voiceNoteTranscript && (
+          {!calculatedFutureValue && !calculatedPrincipal && !calculatedAnnualInterestRate && !calculatedTimePeriod && (
             <div className="text-center text-gray-500 italic">
               Enter your financial details and click 'Calculate' to see the results.
             </div>

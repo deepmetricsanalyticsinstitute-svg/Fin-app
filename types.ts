@@ -23,7 +23,6 @@ export interface CalculationResult {
   error?: string;
   growthData?: { year: number; value: number; }[];
   realFutureValue?: number;
-  voiceNoteTranscript?: string; // Added voiceNoteTranscript
   calculationTarget?: CalculationTarget; // Added to store which target was calculated
 }
 
@@ -37,5 +36,4 @@ export interface InvestmentInputs {
   currencyCode: string;
   customCurrencySymbol?: string;
   inflationRate?: number;
-  voiceNoteTranscript?: string; // Added voiceNoteTranscript
 }

@@ -1,9 +1,7 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Session } from "@google/genai";
+import React, { useState, useCallback } from 'react';
 import { CompoundingFrequency, InvestmentInputs, CalculationTarget } from '../types';
 import InputGroup from './InputGroup';
 import SelectGroup from './SelectGroup';
-import { createPcmBlob, decode, decodeAudioData, encode } from '../utils/audioUtils'; // Import audio utilities
 
 interface InvestmentFormProps {
   onCalculate: (inputs: InvestmentInputs) => void;
@@ -25,13 +23,6 @@ const CALCULATION_TARGET_OPTIONS = [
   { value: CalculationTarget.TIME_PERIOD, label: 'Time Period (t)' },
 ];
 
-// Initialize GoogleGenAI once
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-// FIX: Replace webkitAudioContext with AudioContext
-const outputAudioContext = new (window.AudioContext ||
-  window.AudioContext)({ sampleRate: 24000 });
-const outputNode = outputAudioContext.createGain();
-
 const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
   const [calculationTarget, setCalculationTarget] = useState<CalculationTarget>(CalculationTarget.FUTURE_VALUE);
 
@@ -47,21 +38,6 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
   const [inflationRate, setInflationRate] = useState<number>(0);
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
-
-  // Voice Note states and refs
-  const [isRecording, setIsRecording] = useState(false);
-  const [isLiveSessionConnecting, setIsLiveSessionConnecting] = useState(false);
-  const currentTranscriptionRef = useRef<string>('');
-  const [displayTranscription, setDisplayTranscription] = useState<string>('');
-  const [finalVoiceNoteTranscript, setFinalVoiceNoteTranscript] = useState<string | undefined>(undefined);
-
-  // FIX: Change liveSessionRef type to store the resolved Session object
-  const liveSessionRef = useRef<Session | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioInputContextRef = useRef<AudioContext | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
-  const nextStartTimeRef = useRef<number>(0);
-  const audioSourceNodesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
   const validate = useCallback(() => {
     const newErrors: { [key: string]: string } = {};
@@ -142,183 +118,8 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
     setter(isNaN(numValue) ? 0 : numValue);
   }, []);
 
-  const handleStartRecording = async () => {
-    if (isRecording) return;
-    setIsLiveSessionConnecting(true);
-    currentTranscriptionRef.current = '';
-    setDisplayTranscription('');
-    setFinalVoiceNoteTranscript(undefined);
-    nextStartTimeRef.current = 0; // Reset for new session
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      // FIX: Replace webkitAudioContext with AudioContext
-      const inputAudioContext = new (window.AudioContext || window.AudioContext)({ sampleRate: 16000 });
-      audioInputContextRef.current = inputAudioContext;
-
-      const source = inputAudioContext.createMediaStreamSource(stream);
-      const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
-      scriptProcessorRef.current = scriptProcessor;
-
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-        callbacks: {
-          onopen: () => {
-            console.debug('Gemini Live session opened');
-            setIsRecording(true);
-            setIsLiveSessionConnecting(false);
-          },
-          onmessage: async (message: LiveServerMessage) => {
-            if (message.serverContent?.outputTranscription) {
-              currentTranscriptionRef.current += message.serverContent.outputTranscription.text;
-              setDisplayTranscription(currentTranscriptionRef.current);
-            } else if (message.serverContent?.inputTranscription) {
-              currentTranscriptionRef.current += message.serverContent.inputTranscription.text;
-              setDisplayTranscription(currentTranscriptionRef.current);
-            }
-            if (message.serverContent?.turnComplete) {
-              // Optionally finalize transcription here for this turn, or wait for stop
-            }
-
-            // Handle audio output from the model
-            const base64EncodedAudioString = message.serverContent?.modelTurn?.parts[0]?.inlineData.data;
-            if (base64EncodedAudioString) {
-              nextStartTimeRef.current = Math.max(
-                nextStartTimeRef.current,
-                outputAudioContext.currentTime,
-              );
-              const audioBuffer = await decodeAudioData(
-                decode(base64EncodedAudioString),
-                outputAudioContext,
-                24000,
-                1,
-              );
-              const sourceNode = outputAudioContext.createBufferSource();
-              sourceNode.buffer = audioBuffer;
-              sourceNode.connect(outputNode);
-              sourceNode.addEventListener('ended', () => {
-                audioSourceNodesRef.current.delete(sourceNode);
-              });
-
-              sourceNode.start(nextStartTimeRef.current);
-              nextStartTimeRef.current = nextStartTimeRef.current + audioBuffer.duration;
-              audioSourceNodesRef.current.add(sourceNode);
-            }
-
-            const interrupted = message.serverContent?.interrupted;
-            if (interrupted) {
-              for (const sourceNode of audioSourceNodesRef.current.values()) {
-                sourceNode.stop();
-                audioSourceNodesRef.current.delete(sourceNode);
-              }
-              nextStartTimeRef.current = 0;
-            }
-          },
-          onerror: (e: ErrorEvent) => {
-            console.error('Gemini Live session error:', e);
-            handleStopRecording();
-            setErrors(prev => ({ ...prev, voiceNote: 'Voice recording error. Please try again.' }));
-          },
-          onclose: (e: CloseEvent) => {
-            console.debug('Gemini Live session closed:', e);
-            setIsRecording(false);
-            setIsLiveSessionConnecting(false);
-            if (!e.wasClean) {
-              setErrors(prev => ({ ...prev, voiceNote: 'Voice recording connection lost. Please try again.' }));
-            }
-          },
-        },
-        config: {
-          responseModalities: [Modality.AUDIO],
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
-          },
-        },
-      });
-
-      // FIX: `onaudioprocess` needs to use the `sessionPromise` from its closure scope.
-      scriptProcessor.onaudioprocess = (audioProcessingEvent) => {
-        const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
-        const pcmBlob = createPcmBlob(inputData);
-        // CRITICAL: Solely rely on sessionPromise resolves and then call `session.sendRealtimeInput`
-        sessionPromise.then((session) => {
-          session.sendRealtimeInput({ media: pcmBlob });
-        });
-      };
-
-      source.connect(scriptProcessor);
-      scriptProcessor.connect(inputAudioContext.destination);
-
-      // FIX: Assign the resolved Session object to the ref
-      liveSessionRef.current = await sessionPromise;
-
-    } catch (err) {
-      console.error('Error starting recording:', err);
-      setIsLiveSessionConnecting(false);
-      setIsRecording(false);
-      setErrors(prev => ({ ...prev, voiceNote: 'Failed to start microphone. Please check permissions.' }));
-    }
-  };
-
-  const handleStopRecording = useCallback(() => {
-    setIsRecording(false);
-    setIsLiveSessionConnecting(false);
-
-    // FIX: If liveSessionRef.current holds the resolved Session object, call close directly
-    if (liveSessionRef.current) {
-      liveSessionRef.current.close();
-      liveSessionRef.current = null;
-    }
-
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    if (audioInputContextRef.current) {
-      audioInputContextRef.current.close();
-      audioInputContextRef.current = null;
-    }
-    if (currentTranscriptionRef.current.trim() !== '') {
-      setFinalVoiceNoteTranscript(currentTranscriptionRef.current.trim());
-    }
-    setDisplayTranscription(currentTranscriptionRef.current); // Keep last transcription visible
-  }, []);
-
-  const handleClearTranscription = useCallback(() => {
-    if (isRecording) {
-      handleStopRecording();
-    }
-    currentTranscriptionRef.current = '';
-    setDisplayTranscription('');
-    setFinalVoiceNoteTranscript(undefined);
-  }, [isRecording, handleStopRecording]);
-
-
-  // Cleanup effect
-  useEffect(() => {
-    return () => {
-      // Ensure all resources are cleaned up on component unmount
-      handleStopRecording();
-      if (outputAudioContext) {
-        outputAudioContext.close();
-      }
-    };
-  }, [handleStopRecording]);
-
-
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
-    if (isRecording) {
-      handleStopRecording();
-    }
     if (validate()) {
       onCalculate({
         calculationTarget,
@@ -330,13 +131,12 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
         currencyCode: selectedCurrencyCode,
         customCurrencySymbol: customCurrencySymbol.trim() !== '' ? customCurrencySymbol : undefined,
         inflationRate: inflationRate,
-        voiceNoteTranscript: finalVoiceNoteTranscript,
       });
     }
   }, [
     calculationTarget, principalInput, futureValueInput, annualInterestRateInput, timePeriodInput,
     compoundingFrequency, selectedCurrencyCode, customCurrencySymbol, inflationRate,
-    finalVoiceNoteTranscript, validate, onCalculate, isRecording, handleStopRecording
+    validate, onCalculate
   ]);
 
 
@@ -508,73 +308,6 @@ const InvestmentForm: React.FC<InvestmentFormProps> = ({ onCalculate }) => {
           </svg>
         }
       />
-
-      {/* Voice Note Section */}
-      <div className="mb-4 p-4 border rounded-lg bg-gray-50">
-        <label className="block text-gray-700 text-sm font-semibold mb-2">
-          Voice Note (Optional)
-        </label>
-        <div className="flex items-center space-x-2 mb-2">
-          {!isRecording ? (
-            <button
-              type="button"
-              onClick={handleStartRecording}
-              disabled={isLiveSessionConnecting}
-              className="flex items-center bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLiveSessionConnecting ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 100 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
-                  </svg>
-                  Start Recording
-                </>
-              )}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleStopRecording}
-              className="flex items-center bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
-              </svg>
-              Stop Recording
-            </button>
-          )}
-          {(displayTranscription || finalVoiceNoteTranscript) && (
-            <button
-              type="button"
-              onClick={handleClearTranscription}
-              className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-        {displayTranscription && (
-          <p className="text-sm text-gray-600 italic mt-2">
-            <span className="font-semibold">Live Transcript:</span> {displayTranscription}
-          </p>
-        )}
-        {finalVoiceNoteTranscript && !isRecording && (
-          <p className="text-sm text-gray-800 mt-2">
-            <span className="font-semibold">Final Note:</span> {finalVoiceNoteTranscript}
-          </p>
-        )}
-        {errors.voiceNote && (
-          <p className="text-red-500 text-xs italic mt-1">{errors.voiceNote}</p>
-        )}
-      </div>
 
       <div className="flex items-center justify-center mt-6">
         <button

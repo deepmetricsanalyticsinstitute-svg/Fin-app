@@ -132,7 +132,6 @@ export const performFinancialCalculation = ({
   currencyCode,
   customCurrencySymbol,
   inflationRate,
-  voiceNoteTranscript,
 }: InvestmentInputs): CalculationResult => {
 
   let result: CalculationResult;
@@ -183,10 +182,6 @@ export const performFinancialCalculation = ({
       result = { currencyCode, customCurrencySymbol, error: 'Invalid calculation target.', calculationTarget: calculationTarget };
   }
 
-  // Include voice note transcript in the result
-  if (voiceNoteTranscript) {
-    result.voiceNoteTranscript = voiceNoteTranscript;
-  }
   // Ensure calculationTarget is always included in the final result object.
   result.calculationTarget = calculationTarget;
 

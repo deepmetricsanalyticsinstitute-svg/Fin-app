@@ -26,7 +26,6 @@ const App: React.FC = () => {
         customCurrencySymbol={calculationResult?.customCurrencySymbol}
         growthData={calculationResult?.growthData}
         realFutureValue={calculationResult?.realFutureValue ?? null}
-        voiceNoteTranscript={calculationResult?.voiceNoteTranscript} // Pass voice note transcript
       />
     </div>
   );
